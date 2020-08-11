@@ -3,6 +3,7 @@ import pandas as pd
 
 from course_lib.Data_manager.DataReader import DataReader
 from course_lib.Data_manager.IncrementalSparseMatrix import IncrementalSparseMatrix_FilterIDs
+from src.utils.utilities import get_project_root_path
 
 
 def load_URM(file_path, separator):
@@ -22,16 +23,16 @@ def load_URM(file_path, separator):
            URM_all_builder.get_row_token_to_id_mapper()
 
 
-class MovieLens100kReader(DataReader):
-    DATASET_SUBFOLDER = "data/"
+class NoHeaderCSVReader(DataReader):
     AVAILABLE_URM = ["URM_all"]
 
     IS_IMPLICIT = False
 
-    def __init__(self, root_path="../data/", reload_from_original=False):
+    def __init__(self, filename, reload_from_original=False):
         super().__init__(reload_from_original_data=reload_from_original)
-        self.root_path = root_path
-        self.URM_path = os.path.join(root_path, "ml100k.tsv")
+        root_path = os.path.join(get_project_root_path(), "data")
+        self.URM_path = os.path.join(root_path, filename)
+        self.DATASET_SUBFOLDER = "{}/".format(filename.split(".")[0])
 
         self._LOADED_UCM_DICT = {}
         self._LOADED_UCM_MAPPER_DICT = {}
@@ -45,7 +46,7 @@ class MovieLens100kReader(DataReader):
         print("RecSys2019Reader: Loading original data")
 
         URM_all, self.item_original_ID_to_index, self.user_original_ID_to_index = load_URM(self.URM_path,
-                                                                                           separator="\t")
+                                                                                           separator=',')
         self._LOADED_URM_DICT["URM_all"] = URM_all
         self._LOADED_GLOBAL_MAPPER_DICT["user_original_ID_to_index"] = self.user_original_ID_to_index
         self._LOADED_GLOBAL_MAPPER_DICT["item_original_ID_to_index"] = self.item_original_ID_to_index

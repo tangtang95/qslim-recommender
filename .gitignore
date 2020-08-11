@@ -1,5 +1,10 @@
 notebook/
+report/
+data/
 .idea/
+scripts/experiments/Data_manager_split_datasets
+
+*.zip
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
