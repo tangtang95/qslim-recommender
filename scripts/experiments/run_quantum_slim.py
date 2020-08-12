@@ -9,15 +9,21 @@ from course_lib.Base.Evaluation.Evaluator import EvaluatorHoldout
 from course_lib.Data_manager.DataSplitter_k_fold import DataSplitter_Warm_k_fold
 from src.data.NoHeaderCSVReader import NoHeaderCSVReader
 from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
+from src.models.QuantumSLIM.ResponseAggregators.ResponseAvg import ResponseAvg
+from src.models.QuantumSLIM.ResponseAggregators.ResponseAvgFirst import ResponseAvgFirst
+from src.models.QuantumSLIM.ResponseAggregators.ResponseExp import ResponseExp
 from src.models.QuantumSLIM.ResponseAggregators.ResponseFirst import ResponseFirst
 from src.models.QuantumSLIM.ResponseAggregators.ResponseLog import ResponseLog
+from src.models.QuantumSLIM.ResponseAggregators.ResponseLogFirst import ResponseLogFirst
+from src.models.QuantumSLIM.ResponseAggregators.ResponseWeightedAvg import ResponseWeightedAvg
+from src.models.QuantumSLIM.ResponseAggregators.ResponseWeightedAvgFirst import ResponseWeightedAvgFirst
 from src.models.QuantumSLIM.Transformations.MSETransformation import MSETransformation
 from src.models.QuantumSLIM.Transformations.NormMSETransformation import NormMSETransformation
 from src.utils.utilities import handle_folder_creation, get_project_root_path
 
 SOLVER_NAMES = ["QPU", "SA"]
 LOSS_NAMES = ["MSE", "NORM_MSE"]
-AGGREGATION_NAMES = ["FIRST", "LOG"]
+AGGREGATION_NAMES = ["FIRST", "LOG", "LOG_FIRST", "EXP", "AVG", "AVG_FIRST", "WEIGHTED_AVG", "WEIGHTED_AVG_FIRST"]
 
 DEFAULT_N_FOLDS = 5
 DEFAULT_SOLVER = "SA"
@@ -97,6 +103,18 @@ def get_aggregation_strategy(aggregation_name):
         agg_strategy = ResponseFirst()
     elif aggregation_name == "LOG":
         agg_strategy = ResponseLog()
+    elif aggregation_name == "LOG_FIRST":
+        agg_strategy = ResponseLogFirst()
+    elif aggregation_name == "EXP":
+        agg_strategy = ResponseExp()
+    elif aggregation_name == "AVG":
+        agg_strategy = ResponseAvg()
+    elif aggregation_name == "AVG_FIRST":
+        agg_strategy = ResponseAvgFirst()
+    elif aggregation_name == "WEIGHTED_AVG":
+        agg_strategy = ResponseWeightedAvg()
+    elif aggregation_name == "WEIGHTED_AVG_FIRST":
+        agg_strategy = ResponseWeightedAvgFirst()
     else:
         raise NotImplementedError("Aggregation strategy {} is not implemented".format(aggregation_name))
     return agg_strategy
@@ -116,7 +134,7 @@ def run_experiment(args):
     model.fit(topK=args.top_k, num_reads=args.num_reads)
 
     evaluator = EvaluatorHoldout(URM_val, cutoff_list=[args.cutoff])
-    return evaluator.evaluateRecommender(model)
+    return evaluator.evaluateRecommender(model)[0]
 
 
 if __name__ == '__main__':
