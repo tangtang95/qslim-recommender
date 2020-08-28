@@ -5,6 +5,8 @@ from src.models.QuantumSLIM.Transformations.TransformationInterface import Trans
 
 
 class MSETransformation(TransformationInterface):
+    def __init__(self, only_positive: bool):
+        self.only_positive = only_positive
 
     def get_qubo_problem(self, urm: sps.csr_matrix, target_column: np.ndarray):
         """
@@ -12,7 +14,13 @@ class MSETransformation(TransformationInterface):
         item ("item_index")
 
         :param urm: the csr matrix representing the training URM
-        :param target_column: a numpy array containing the target item column
+        :param target_column: a numpy array containing the target item column (user_size x 1)
         :return: numpy matrix (item_size x item_size) containing the QUBO MSE problem
         """
-        return urm.T.dot(urm) - 2*np.diag(urm.T.dot(target_column))
+        t_urm = urm
+        t_target = target_column
+        if self.only_positive:
+            t_urm = urm[(target_column > 0).ravel(), :]
+            t_target = target_column[target_column > 0]
+
+        return t_urm.T.dot(t_urm) - 2*np.diag(t_urm.T.dot(t_target))

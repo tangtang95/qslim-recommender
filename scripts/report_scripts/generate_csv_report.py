@@ -26,6 +26,8 @@ if __name__ == '__main__':
 
     for filepath in report_files:
         parameter_values = {}
+        parameter_values["ChainMultiplier"] = 1.0
+        parameter_values["ConstraintMultiplier"] = 1.0
 
         with open(filepath, 'r') as f:
             lines = f.readlines()
@@ -41,6 +43,10 @@ if __name__ == '__main__':
                     parameter_values["TopK"] = line.split(": ")[-1]
                 elif line.find("Number of reads") != -1:
                     parameter_values["NumReads"] = line.split(": ")[-1]
+                elif line.find("Constraint") != -1:
+                    parameter_values["ConstraintMultiplier"] = line.split(": ")[-1]
+                elif line.find("Chain") != -1:
+                    parameter_values["ChainMultiplier"] = line.split(": ")[-1]
                 elif line.find("ROC_AUC") != -1:
                     results = json.loads(line[3:-1].replace("\'", "\""))
 
@@ -52,6 +58,8 @@ if __name__ == '__main__':
             "AggregationStrategy": parameter_values["AggregationStrategy"],
             "TopK": parameter_values["TopK"],
             "NumReads": parameter_values["NumReads"],
+            "ConstraintMultiplier": parameter_values["ConstraintMultiplier"],
+            "ChainMultiplier": parameter_values["ChainMultiplier"],
             "ROC_AUC": results["ROC_AUC"],
             "PRECISION": results["PRECISION"],
             "RECALL": results["RECALL"],

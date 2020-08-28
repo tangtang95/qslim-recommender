@@ -12,7 +12,7 @@ class TransformationInterface(ABC):
         ("item_index")
 
         :param urm: the csr matrix representing the training URM
-        :param target_column: a numpy array containing the target item column
+        :param target_column: a numpy array containing the target item column (user_size x 1)
         :return: numpy matrix (item_size x item_size) containing the QUBO MSE problem
         """
         pass
