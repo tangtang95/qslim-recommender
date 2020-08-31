@@ -32,6 +32,22 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         self.filter_strategy = filter_strategy
         self.df_responses = None
 
+    def build_similarity_matrix(self, df_responses):
+        n_items = self.URM_train.shape[1]
+        matrix_builder = IncrementalSparseMatrix(n_rows=n_items, n_cols=n_items)
+
+        for currentItem in range(n_items):
+            response_df = df_responses[df_responses.item_id == currentItem].copy()
+            filtered_response_df = self.filter_strategy.filter_samples(response_df)
+            solution_list = self.agg_strategy.get_aggregated_response(filtered_response_df)
+
+            self._print("The aggregated response for item {} is {}".format(currentItem,
+                                                                           solution_list))
+
+            row_indices = np.where(solution_list > 0)[0]
+            matrix_builder.add_data_lists(row_indices, [currentItem] * len(row_indices), solution_list[row_indices])
+        return sps.csr_matrix(matrix_builder.get_SparseMatrix())
+
     def fit(self, topK=5, fixK=True, constraint_multiplier=1, chain_multiplier=1,
             **solver_parameters):
         """
@@ -45,8 +61,10 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         """
         URM_train = check_matrix(self.URM_train, 'csc', dtype=np.float32)
         n_items = URM_train.shape[1]
-        matrix_builder = IncrementalSparseMatrix(n_rows=n_items, n_cols=n_items)
+
         mapping = {i: "a{:02d}".format(i) for i in range(n_items)}
+        min_constraint_strength = 10
+        min_chain_strength = 10
 
         for currentItem in tqdm(range(n_items), desc="{}: Computing W_sparse matrix".format(self.RECOMMENDER_NAME)):
             # get the target column
@@ -61,7 +79,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             # get BQM/QUBO problem for the current item
             qubo = self.transform_fn.get_qubo_problem(URM_train, target_column)
             if topK != -1 and fixK:
-                constraint_strength = constraint_multiplier * np.abs((np.max(qubo) - np.min(qubo)))
+                constraint_strength = max(min_constraint_strength,
+                                          constraint_multiplier * np.abs((np.max(qubo) - np.min(qubo))))
                 bqm = dimod.generators.combinations(n_items, topK, strength=constraint_strength)
                 qubo = qubo + bqm.to_numpy_matrix()
 
@@ -73,7 +92,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
 
             # solve the problem with the solver
             if type(self.solver) is EmbeddingComposite:
-                chain_strength = chain_multiplier * np.abs((np.max(qubo) - np.min(qubo)))
+                chain_strength = max(min_chain_strength,
+                                     chain_multiplier * np.abs((np.max(qubo) - np.min(qubo))))
                 response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
             else:
                 response = self.solver.sample(bqm, **solver_parameters)
@@ -83,13 +103,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                 self._print("Break chain percentage of item {} is {}"
                             .format(currentItem, list(response.data(fields=["chain_break_fraction"]))))
 
-            # aggregate response into a vector of similarities and save it into W_sparse
-            response_df = response.to_pandas_dataframe()
-            filtered_response_df = self.filter_strategy.filter_samples(response_df)
-            solution_list = self.agg_strategy.get_aggregated_response(filtered_response_df)
-            solution_list = np.insert(solution_list, currentItem, 0)
-
             # save response in self.responses
+            response_df = response.to_pandas_dataframe()
             response_df["a{:02d}".format(currentItem)] = 0.0
             response_df["item_id"] = currentItem
             if self.df_responses is None:
@@ -98,12 +113,7 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             else:
                 self.df_responses = self.df_responses.append(response_df, ignore_index=True)
 
-            self._print("The aggregated response for item {} is {}".format(currentItem,
-                                                                           solution_list))
-            row_indices = np.where(solution_list > 0)[0]
-            matrix_builder.add_data_lists(row_indices, [currentItem] * len(row_indices), solution_list[row_indices])
-
             # restore URM_train
             URM_train.data[start_pos:end_pos] = current_item_data_backup
 
-        self.W_sparse = sps.csr_matrix(matrix_builder.get_SparseMatrix())
+        self.W_sparse = self.build_similarity_matrix(self.df_responses)

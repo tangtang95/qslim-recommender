@@ -3,6 +3,7 @@ import os
 
 import neal
 import numpy as np
+import pandas as pd
 from dwave.system.composites import EmbeddingComposite
 from dwave.system.samplers import DWaveSampler
 
@@ -36,6 +37,7 @@ DEFAULT_NUM_READS = 50
 DEFAULT_MULTIPLIER = 1.0
 DEFAULT_CUTOFF = 5
 DEFAULT_OUTPUT_FOLDER = os.path.join(get_project_root_path(), "report", "quantum_slim")
+DEFAULT_RESPONSES_CSV_FILENAME = "solver_responses.csv"
 
 DWAVE_TOKEN = 'DEV-0303e4137a04f495870145d26be7d5b735899b07'
 
@@ -52,6 +54,12 @@ def get_arguments():
     parser.add_argument("-f", "--filename", help="File name of the CSV dataset to load (the file has to"
                                                  "be stored in data folder)", required=True, type=str)
     parser.add_argument("-n", "--n_folds", help="Number of holds to split", default=DEFAULT_N_FOLDS, type=int)
+
+    # Cache setting
+    parser.add_argument("-fp", "--foldername", help="Folder name of the folder in report/quantum_slim containing "
+                                                    "samples responses from a"
+                                                    "previous experiment. If this is compiled, then the solver is not"
+                                                    "used", type=str)
 
     # Quantum SLIM setting
     parser.add_argument("-s", "--solver", help="Solver used for Quantum SLIM", choices=SOLVER_NAMES, type=str,
@@ -166,8 +174,13 @@ def run_experiment(args):
     filter_strategy = get_filter_strategy(args.filter, args.top_filter)
     model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, transform_fn=loss_fn, agg_strategy=agg_strategy,
                             filter_strategy=filter_strategy)
-    model.fit(topK=args.top_k, num_reads=args.num_reads, constraint_multiplier=args.constr_mlt,
-              chain_multiplier=args.chain_mlt)
+
+    if args.foldername is None:
+        model.fit(topK=args.top_k, num_reads=args.num_reads, constraint_multiplier=args.constr_mlt,
+                  chain_multiplier=args.chain_mlt)
+    else:
+        responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
+        model.W_sparse = model.build_similarity_matrix(df_responses=responses_df)
 
     evaluator = EvaluatorHoldout(URM_val, cutoff_list=[args.cutoff])
     return model, evaluator.evaluateRecommender(model)[0]
@@ -184,7 +197,26 @@ if __name__ == '__main__':
 
         # Save model
         model.save_model(folder_path=folder_path_with_date)
-        model.df_responses.to_csv(os.path.join(folder_path_with_date, "solver_responses.csv"), index=False)
+        if arguments.foldername is None:
+            model.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
+        else:
+            cache_results_filepath = os.path.join(arguments.output_folder, arguments.foldername, "results.txt")
+            with open(cache_results_filepath, 'r') as f:
+                lines = f.readlines()
+                for line in lines:
+                    line = line.rstrip()
+                    if line.find("Solver") != -1:
+                        arguments.solver = line.split(": ")[-1]
+                    elif line.find("Loss") != -1:
+                        arguments.loss = line.split(": ")[-1]
+                    elif line.find("Top K") != -1:
+                        arguments.top_k = line.split(": ")[-1]
+                    elif line.find("Number of reads") != -1:
+                        arguments.num_reads = line.split(": ")[-1]
+                    elif line.find("Constraint") != -1:
+                        arguments.constr_mlt = line.split(": ")[-1]
+                    elif line.find("Chain") != -1:
+                        arguments.chain_mlt = line.split(": ")[-1]
 
         fd.write("--- Quantum SLIM Experiment ---\n")
         fd.write("\n")
@@ -205,7 +237,9 @@ if __name__ == '__main__':
         fd.write("\n")
 
         fd.write("- Results -\n")
+        if arguments.foldername is not None:
+            fd.write("The following results comes from the solver_responses.csv of folder {}\n"
+                     .format(arguments.foldername))
         fd.write(str(result))
 
         fd.close()
-

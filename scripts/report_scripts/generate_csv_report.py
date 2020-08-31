@@ -7,7 +7,7 @@ import pandas as pd
 from src.utils.utilities import get_project_root_path
 
 REPORT_ROOT_PATH = os.path.join(get_project_root_path(), "report", "quantum_slim")
-FINAL_REPORT_PATH = os.path.join(get_project_root_path(), "report", "final_report", "quantum_slim")
+FINAL_REPORT_PATH = os.path.join(get_project_root_path(), "report", "quantum_slim_final_report", "quantum_slim")
 
 if __name__ == '__main__':
     report_files = []
@@ -28,6 +28,7 @@ if __name__ == '__main__':
         parameter_values = {}
         parameter_values["ChainMultiplier"] = 1.0
         parameter_values["ConstraintMultiplier"] = 1.0
+        parameter_values["Cached"] = "No"
 
         with open(filepath, 'r') as f:
             lines = f.readlines()
@@ -39,6 +40,10 @@ if __name__ == '__main__':
                     parameter_values["Loss"] = line.split(": ")[-1]
                 elif line.find("Aggregation") != -1:
                     parameter_values["AggregationStrategy"] = line.split(": ")[-1]
+                elif line.find("Filter strategy") != -1:
+                    parameter_values["FilterStrategy"] = line.split(": ")[-1]
+                elif line.find("Top filter value") != -1:
+                    parameter_values["TopFilterValue"] = line.split(": ")[-1]
                 elif line.find("Top K") != -1:
                     parameter_values["TopK"] = line.split(": ")[-1]
                 elif line.find("Number of reads") != -1:
@@ -47,6 +52,8 @@ if __name__ == '__main__':
                     parameter_values["ConstraintMultiplier"] = line.split(": ")[-1]
                 elif line.find("Chain") != -1:
                     parameter_values["ChainMultiplier"] = line.split(": ")[-1]
+                elif line.find("following results") != -1:
+                    parameter_values["Cached"] = line.split(" ")[-1]
                 elif line.find("ROC_AUC") != -1:
                     results = json.loads(line[3:-1].replace("\'", "\""))
 
@@ -56,10 +63,13 @@ if __name__ == '__main__':
             "Solver": parameter_values["Solver"],
             "Loss": parameter_values["Loss"],
             "AggregationStrategy": parameter_values["AggregationStrategy"],
+            "FilterStrategy": parameter_values["FilterStrategy"],
+            "TopFilterValue": parameter_values["TopFilterValue"],
             "TopK": parameter_values["TopK"],
             "NumReads": parameter_values["NumReads"],
             "ConstraintMultiplier": parameter_values["ConstraintMultiplier"],
             "ChainMultiplier": parameter_values["ChainMultiplier"],
+            "Cached": parameter_values["Cached"],
             "ROC_AUC": results["ROC_AUC"],
             "PRECISION": results["PRECISION"],
             "RECALL": results["RECALL"],
