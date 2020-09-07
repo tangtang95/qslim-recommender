@@ -1,7 +1,7 @@
 import dimod
 import numpy as np
 import scipy.sparse as sps
-from dwave.system import EmbeddingComposite
+from dwave.system import EmbeddingComposite, LazyFixedEmbeddingComposite
 from tqdm import tqdm
 
 from course_lib.Base.BaseSimilarityMatrixRecommender import BaseItemSimilarityMatrixRecommender
@@ -86,12 +86,11 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
 
             bqm = dimod.binary_quadratic_model.BQM.from_numpy_matrix(qubo, offset=0)
             bqm.relabel_variables(mapping=mapping)
-            bqm.fix_variable("a{:02d}".format(currentItem), 0)
 
             self._print("The BQM for item {} is {}".format(currentItem, bqm))
 
             # solve the problem with the solver
-            if type(self.solver) is EmbeddingComposite:
+            if type(self.solver) is EmbeddingComposite or type(self.solver) is LazyFixedEmbeddingComposite:
                 chain_strength = max(min_chain_strength,
                                      chain_multiplier * np.abs((np.max(qubo) - np.min(qubo))))
                 response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
@@ -99,7 +98,7 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                 response = self.solver.sample(bqm, **solver_parameters)
 
             self._print("The response for item {} is {}".format(currentItem, response.aggregate()))
-            if type(self.solver) is EmbeddingComposite:
+            if type(self.solver) is EmbeddingComposite or type(self.solver) is LazyFixedEmbeddingComposite:
                 self._print("Break chain percentage of item {} is {}"
                             .format(currentItem, list(response.data(fields=["chain_break_fraction"]))))
 

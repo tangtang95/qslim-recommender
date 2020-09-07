@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import pandas as pd
+import numpy as np
 
 from src.utils.utilities import get_project_root_path
 
@@ -21,14 +22,21 @@ if __name__ == '__main__':
     solver_values = []
     loss_values = []
 
-    df = pd.DataFrame(columns=["Datetime", "Algorithm", "Solver", "Loss", "AggregationStrategy", "TopK", "NumReads",
-                               "ROC_AUC", "PRECISION", "RECALL", "MAP", "RMSE"])
+    df = pd.DataFrame(columns=["Datetime", "Algorithm", "Solver", "Loss", "AggregationStrategy",
+                               "FilterStrategy", "TopFilterValue", "TopK", "NumReads",
+                               "ConstraintMultiplier", "ChainMultiplier", "Cached",
+                               "PRECISION", "RECALL", "MAP", "NDCG", "AVERAGE_POPULARITY", "DIVERSITY_MEAN_INTER_LIST",
+                               "COVERAGE_ITEM", "CHAIN_BREAK_FRACTION_MAX", "CHAIN_BREAK_FRACTION_MEAN",
+                               "CHAIN_BREAK_FRACTION_STD"])
 
     for filepath in report_files:
         parameter_values = {}
         parameter_values["ChainMultiplier"] = 1.0
         parameter_values["ConstraintMultiplier"] = 1.0
         parameter_values["Cached"] = "No"
+        parameter_values["CHAIN_BREAK_FRACTION_MAX"] = ""
+        parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = ""
+        parameter_values["CHAIN_BREAK_FRACTION_STD"] = ""
 
         with open(filepath, 'r') as f:
             lines = f.readlines()
@@ -57,6 +65,16 @@ if __name__ == '__main__':
                 elif line.find("ROC_AUC") != -1:
                     results = json.loads(line[3:-1].replace("\'", "\""))
 
+        if parameter_values["Solver"].endswith("QPU") and parameter_values["Cached"] == "No":
+            samples_filepath = os.path.join("/".join(filepath.split("/")[:-1]), "solver_responses.csv")
+            samples_df = pd.read_csv(samples_filepath)
+            parameter_values["CHAIN_BREAK_FRACTION_MAX"] = samples_df["chain_break_fraction"].max()
+            parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = np.mean(samples_df["chain_break_fraction"])
+            parameter_values["CHAIN_BREAK_FRACTION_STD"] = np.std(samples_df["chain_break_fraction"])
+
+        if parameter_values["FilterStrategy"] == "NONE":
+            parameter_values["TopFilterValue"] = ""
+
         df = df.append({
             "Datetime": filepath.split("/")[-2],
             "Algorithm": "Quantum SLIM",
@@ -70,15 +88,18 @@ if __name__ == '__main__':
             "ConstraintMultiplier": parameter_values["ConstraintMultiplier"],
             "ChainMultiplier": parameter_values["ChainMultiplier"],
             "Cached": parameter_values["Cached"],
-            "ROC_AUC": results["ROC_AUC"],
             "PRECISION": results["PRECISION"],
             "RECALL": results["RECALL"],
             "MAP": results["MAP"],
-            "RMSE": results["RMSE"],
+            "NDCG": results["NDCG"],
+            "AVERAGE_POPULARITY": results["AVERAGE_POPULARITY"],
+            "DIVERSITY_MEAN_INTER_LIST": results["DIVERSITY_MEAN_INTER_LIST"],
+            "COVERAGE_ITEM": results["COVERAGE_ITEM"],
+            "CHAIN_BREAK_FRACTION_MAX": parameter_values["CHAIN_BREAK_FRACTION_MAX"],
+            "CHAIN_BREAK_FRACTION_MEAN": parameter_values["CHAIN_BREAK_FRACTION_MEAN"],
+            "CHAIN_BREAK_FRACTION_STD": parameter_values["CHAIN_BREAK_FRACTION_STD"],
         }, ignore_index=True)
     print(df.head())
 
     date_string = datetime.now().strftime('%b%d_%H-%M-%S')
     df.to_csv(os.path.join(FINAL_REPORT_PATH, "{}.csv".format(date_string)), index=False)
-
-

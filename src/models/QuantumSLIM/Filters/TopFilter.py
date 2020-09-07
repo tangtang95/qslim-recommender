@@ -11,4 +11,4 @@ class TopFilter(FilterStrategy):
 
     def filter_samples(self, response_df: pd.DataFrame):
         top_k = int(np.ceil(self.top_p * response_df.shape[0]))
-        return response_df.sort_values(by="energy", ascending=True).iloc[:top_k]
+        return response_df.copy().sort_values(by="energy", ascending=True).iloc[:top_k]
