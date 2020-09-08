@@ -3,7 +3,7 @@ import scipy.sparse as sps
 import numpy as np
 
 
-class TransformationInterface(ABC):
+class LossInterface(ABC):
 
     @abstractmethod
     def get_qubo_problem(self, urm: sps.csr_matrix, target_column: np.ndarray):

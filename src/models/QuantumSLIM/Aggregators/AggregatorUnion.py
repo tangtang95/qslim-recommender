@@ -1,17 +1,16 @@
-from typing import List
-
+import numpy as np
 import pandas as pd
 
-from src.models.QuantumSLIM.ResponseAggregators.ResponseAggregateStrategy import ResponseAggregateStrategy
+from src.models.QuantumSLIM.Aggregators.AggregatorInterface import AggregatorInterface
 
 
-class ResponseGenericOperation(ResponseAggregateStrategy):
+class AggregatorUnion(AggregatorInterface):
     def __init__(self, operator_fn: callable, is_filter_first: bool, is_weighted: bool):
         self.operator_fn = operator_fn
         self.is_filter_first = is_filter_first
         self.is_weighted = is_weighted
 
-    def get_aggregated_response(self, response_df: pd.DataFrame) -> List:
+    def get_aggregated_response(self, response_df: pd.DataFrame) -> np.ndarray:
         best_samples = response_df[response_df["energy"] == response_df["energy"].min()]
         var_names = [col for col in best_samples.columns.to_list() if col.startswith("a")]
         first_sample = best_samples[var_names].to_numpy()[0]

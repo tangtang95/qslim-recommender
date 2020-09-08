@@ -1,10 +1,10 @@
 from scipy import sparse as sps
 import numpy as np
 
-from src.models.QuantumSLIM.Transformations.TransformationInterface import TransformationInterface
+from src.models.QuantumSLIM.Losses.LossInterface import LossInterface
 
 
-class MSETransformation(TransformationInterface):
+class MSELoss(LossInterface):
     def __init__(self, only_positive: bool):
         self.only_positive = only_positive
 

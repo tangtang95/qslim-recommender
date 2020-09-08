@@ -14,12 +14,12 @@ from src.data.NoHeaderCSVReader import NoHeaderCSVReader
 from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
 from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
 from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
-from src.models.QuantumSLIM.ResponseAggregators.ResponseFirst import ResponseFirst
-from src.models.QuantumSLIM.ResponseAggregators.ResponseGenericOperation import ResponseGenericOperation
+from src.models.QuantumSLIM.Aggregators.AggregatorFirst import AggregatorFirst
+from src.models.QuantumSLIM.Aggregators.AggregatorUnion import AggregatorUnion
 
-from src.models.QuantumSLIM.Transformations.MSETransformation import MSETransformation
-from src.models.QuantumSLIM.Transformations.NormMSETransformation import NormMSETransformation
-from src.utils.utilities import handle_folder_creation, get_project_root_path
+from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
+from src.models.QuantumSLIM.Losses.NormMSELoss import NormMSELoss
+from src.utils.utilities import handle_folder_creation, get_project_root_path, str2bool
 
 SOLVER_NAMES = ["QPU", "SA", "LAZY_QPU"]
 LOSS_NAMES = ["MSE", "NORM_MSE", "NON_ZERO_MSE", "NON_ZERO_NORM_MSE", "SIM_NORM_MSE", "SIM_NON_ZERO_NORM_MSE"]
@@ -27,20 +27,27 @@ AGGREGATION_NAMES = ["FIRST", "LOG", "LOG_FIRST", "EXP", "EXP_FIRST", "AVG", "AV
                      "WEIGHTED_AVG_FIRST"]
 FILTER_NAMES = ["NONE", "TOP"]
 
+# DATASET DEFAULT VALUES
 DEFAULT_N_FOLDS = 5
+
+# CONSTRUCTOR DEFAULT VALUES
 DEFAULT_SOLVER = "SA"
 DEFAULT_LOSS = "MSE"
 DEFAULT_AGGREGATION = "FIRST"
 DEFAULT_FILTER = "NONE"
 DEFAULT_FILTER_TOP_VALUE = 0.2
+
+# FIT DEFAULT VALUES
 DEFAULT_TOP_K = 5
 DEFAULT_NUM_READS = 50
 DEFAULT_MULTIPLIER = 1.0
+DEFAULT_REMOVE_UNPOPULAR_ITEMS = False
+DEFAULT_UNPOPULAR_THRESHOLD = 4  # it removes items with less and equal than this
+
+# OTHERS
 DEFAULT_CUTOFF = 5
 DEFAULT_OUTPUT_FOLDER = os.path.join(get_project_root_path(), "report", "quantum_slim")
 DEFAULT_RESPONSES_CSV_FILENAME = "solver_responses.csv"
-
-DWAVE_TOKEN = 'DEV-0303e4137a04f495870145d26be7d5b735899b07'
 
 
 def get_arguments():
@@ -85,6 +92,13 @@ def get_arguments():
                         type=float, default=DEFAULT_MULTIPLIER)
     parser.add_argument("-chm", "--chain_mlt", help="Chain multiplier of the auto-embedding component",
                         type=float, default=DEFAULT_MULTIPLIER)
+    parser.add_argument("-ru", "--rm_unpop", help="Whether to simplify the problem QUBO by removing unpopular items to"
+                                                  "the variables",
+                        type=str2bool,
+                        default=DEFAULT_REMOVE_UNPOPULAR_ITEMS)
+    parser.add_argument("-ut", "--unpop_thresh", help="The threshold of unpopularity for the removal of unpopular "
+                                                      "items",
+                        type=int, default=DEFAULT_UNPOPULAR_THRESHOLD)
 
     # Evaluation setting
     parser.add_argument("-c", "--cutoff", help="Cutoff value for evaluation", type=int,
@@ -92,24 +106,25 @@ def get_arguments():
 
     # Store results
     parser.add_argument("-v", "--verbose", help="Whether to output on command line much as possible",
-                        type=lambda x: int(x) != 0,
-                        default=1)
-    parser.add_argument("-sr", "--save_result", help="Whether to store results or not", type=lambda x: int(x) != 0,
-                        default=1)
+                        type=str2bool, default=True)
+    parser.add_argument("-sr", "--save_result", help="Whether to store results or not", type=str2bool, default=True)
     parser.add_argument("-o", "--output_folder", default=DEFAULT_OUTPUT_FOLDER,
                         help="Basic folder where to store the output", type=str)
+
+    # Others
+    parser.add_argument("-t", "--token", help="Token string in order to use DWave Sampler", type=str)
 
     return parser.parse_args()
 
 
-def get_solver(solver_name):
+def get_solver(solver_name, token):
     if solver_name == "SA":
         solver = neal.SimulatedAnnealingSampler()
     elif solver_name == "QPU":
-        solver = DWaveSampler(token=DWAVE_TOKEN)
+        solver = DWaveSampler(token=token)
         solver = EmbeddingComposite(solver)
     elif solver_name == "LAZY_QPU":
-        solver = DWaveSampler(token=DWAVE_TOKEN)
+        solver = DWaveSampler(token=token)
         solver = LazyFixedEmbeddingComposite(solver)
     else:
         raise NotImplementedError("Solver {} is not implemented".format(solver_name))
@@ -118,17 +133,17 @@ def get_solver(solver_name):
 
 def get_loss(loss_name):
     if loss_name == "MSE":
-        loss_fn = MSETransformation(only_positive=False)
+        loss_fn = MSELoss(only_positive=False)
     elif loss_name == "NORM_MSE":
-        loss_fn = NormMSETransformation(only_positive=False, is_simplified=False)
+        loss_fn = NormMSELoss(only_positive=False, is_simplified=False)
     elif loss_name == "NON_ZERO_MSE":
-        loss_fn = MSETransformation(only_positive=True)
+        loss_fn = MSELoss(only_positive=True)
     elif loss_name == "NON_ZERO_NORM_MSE":
-        loss_fn = NormMSETransformation(only_positive=True, is_simplified=False)
+        loss_fn = NormMSELoss(only_positive=True, is_simplified=False)
     elif loss_name == "SIM_NORM_MSE":
-        loss_fn = NormMSETransformation(only_positive=False, is_simplified=True)
+        loss_fn = NormMSELoss(only_positive=False, is_simplified=True)
     elif loss_name == "SIM_NON_ZERO_NORM_MSE":
-        loss_fn = NormMSETransformation(only_positive=True, is_simplified=True)
+        loss_fn = NormMSELoss(only_positive=True, is_simplified=True)
     else:
         raise NotImplementedError("Loss function {} is not implemented".format(loss_name))
     return loss_fn
@@ -140,23 +155,23 @@ def get_aggregation_strategy(aggregation_name):
     exp_operation_fn = lambda arr: np.exp(arr)
 
     if aggregation_name == "FIRST":
-        agg_strategy = ResponseFirst()
+        agg_strategy = AggregatorFirst()
     elif aggregation_name == "LOG":
-        agg_strategy = ResponseGenericOperation(log_operation_fn, is_filter_first=False, is_weighted=False)
+        agg_strategy = AggregatorUnion(log_operation_fn, is_filter_first=False, is_weighted=False)
     elif aggregation_name == "LOG_FIRST":
-        agg_strategy = ResponseGenericOperation(log_operation_fn, is_filter_first=True, is_weighted=False)
+        agg_strategy = AggregatorUnion(log_operation_fn, is_filter_first=True, is_weighted=False)
     elif aggregation_name == "EXP":
-        agg_strategy = ResponseGenericOperation(exp_operation_fn, is_filter_first=False, is_weighted=False)
+        agg_strategy = AggregatorUnion(exp_operation_fn, is_filter_first=False, is_weighted=False)
     elif aggregation_name == "EXP_FIRST":
-        agg_strategy = ResponseGenericOperation(exp_operation_fn, is_filter_first=True, is_weighted=False)
+        agg_strategy = AggregatorUnion(exp_operation_fn, is_filter_first=True, is_weighted=False)
     elif aggregation_name == "AVG":
-        agg_strategy = ResponseGenericOperation(no_operation_fn, is_filter_first=False, is_weighted=False)
+        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=False, is_weighted=False)
     elif aggregation_name == "AVG_FIRST":
-        agg_strategy = ResponseGenericOperation(no_operation_fn, is_filter_first=True, is_weighted=False)
+        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=True, is_weighted=False)
     elif aggregation_name == "WEIGHTED_AVG":
-        agg_strategy = ResponseGenericOperation(no_operation_fn, is_filter_first=False, is_weighted=True)
+        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=False, is_weighted=True)
     elif aggregation_name == "WEIGHTED_AVG_FIRST":
-        agg_strategy = ResponseGenericOperation(no_operation_fn, is_filter_first=True, is_weighted=True)
+        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=True, is_weighted=True)
     else:
         raise NotImplementedError("Aggregation strategy {} is not implemented".format(aggregation_name))
     return agg_strategy
@@ -179,7 +194,7 @@ def run_experiment(args):
 
     URM_train, URM_val, URM_test = splitter.get_holdout_split()
 
-    solver = get_solver(args.solver)
+    solver = get_solver(args.solver, args.token)
     loss_fn = get_loss(args.loss)
     agg_strategy = get_aggregation_strategy(args.aggregation)
     filter_strategy = get_filter_strategy(args.filter, args.top_filter)
@@ -188,7 +203,8 @@ def run_experiment(args):
 
     if args.foldername is None:
         model.fit(topK=args.top_k, num_reads=args.num_reads, constraint_multiplier=args.constr_mlt,
-                  chain_multiplier=args.chain_mlt)
+                  chain_multiplier=args.chain_mlt, remove_unpopular_items=args.rm_unpop,
+                  unpopular_threshold=args.unpop_thresh)
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
         model.W_sparse = model.build_similarity_matrix(df_responses=responses_df)
@@ -228,6 +244,10 @@ if __name__ == '__main__':
                         arguments.constr_mlt = line.split(": ")[-1]
                     elif line.find("Chain") != -1:
                         arguments.chain_mlt = line.split(": ")[-1]
+                    elif line.find("Remove unpopular items") != -1:
+                        arguments.rm_unpop = line.split(": ")[-1]
+                    elif line.find("Unpopular threshold") != -1:
+                        arguments.unpop_thresh = line.split(": ")[-1]
 
         fd.write("--- Quantum SLIM Experiment ---\n")
         fd.write("\n")
@@ -245,6 +265,8 @@ if __name__ == '__main__':
         fd.write(" - Number of reads: {}\n".format(arguments.num_reads))
         fd.write(" - Constraint multiplier: {}\n".format(arguments.constr_mlt))
         fd.write(" - Chain multiplier: {}\n".format(arguments.chain_mlt))
+        fd.write(" - Remove unpopular items: {}\n".format(arguments.rm_unpop))
+        fd.write(" - Unpopular threshold: {}\n".format(arguments.unpop_thresh))
         fd.write("\n")
 
         fd.write("- Results -\n")

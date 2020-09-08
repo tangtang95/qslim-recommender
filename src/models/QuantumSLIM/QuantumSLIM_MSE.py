@@ -9,10 +9,10 @@ from course_lib.Base.Recommender_utils import check_matrix
 from course_lib.Data_manager.IncrementalSparseMatrix import IncrementalSparseMatrix
 from src.models.QuantumSLIM.Filters.FilterStrategy import FilterStrategy
 from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
-from src.models.QuantumSLIM.ResponseAggregators.ResponseAggregateStrategy import ResponseAggregateStrategy
-from src.models.QuantumSLIM.ResponseAggregators.ResponseFirst import ResponseFirst
-from src.models.QuantumSLIM.Transformations.MSETransformation import MSETransformation
-from src.models.QuantumSLIM.Transformations.TransformationInterface import TransformationInterface
+from src.models.QuantumSLIM.Aggregators.AggregatorInterface import AggregatorInterface
+from src.models.QuantumSLIM.Aggregators.AggregatorFirst import AggregatorFirst
+from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
+from src.models.QuantumSLIM.Losses.LossInterface import LossInterface
 
 
 class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
@@ -22,8 +22,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
 
     RECOMMENDER_NAME = "QuantumSLIM_MSE"
 
-    def __init__(self, URM_train, solver, agg_strategy: ResponseAggregateStrategy = ResponseFirst(),
-                 transform_fn: TransformationInterface = MSETransformation(only_positive=False),
+    def __init__(self, URM_train, solver, agg_strategy: AggregatorInterface = AggregatorFirst(),
+                 transform_fn: LossInterface = MSELoss(only_positive=False),
                  filter_strategy: FilterStrategy = NoFilter(), verbose=True):
         super(QuantumSLIM_MSE, self).__init__(URM_train, verbose=verbose)
         self.solver = solver
@@ -33,6 +33,11 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         self.df_responses = None
 
     def build_similarity_matrix(self, df_responses):
+        """
+
+        :param df_responses:
+        :return:
+        """
         n_items = self.URM_train.shape[1]
         matrix_builder = IncrementalSparseMatrix(n_rows=n_items, n_cols=n_items)
 
@@ -48,14 +53,16 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             matrix_builder.add_data_lists(row_indices, [currentItem] * len(row_indices), solution_list[row_indices])
         return sps.csr_matrix(matrix_builder.get_SparseMatrix())
 
-    def fit(self, topK=5, fixK=True, constraint_multiplier=1, chain_multiplier=1,
-            **solver_parameters):
+    def fit(self, topK=5, fixK=True, constraint_multiplier=1, chain_multiplier=1, remove_unpopular_items=False,
+            unpopular_threshold=4, **solver_parameters):
         """
 
         :param topK:
         :param fixK:
         :param constraint_multiplier:
         :param chain_multiplier:
+        :param remove_unpopular_items:
+        :param unpopular_threshold:
         :param solver_parameters:
         :return:
         """
@@ -66,13 +73,16 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         min_constraint_strength = 10
         min_chain_strength = 10
 
-        for currentItem in tqdm(range(n_items), desc="{}: Computing W_sparse matrix".format(self.RECOMMENDER_NAME)):
-            # get the target column
-            target_column = URM_train[:, currentItem].toarray()
+        item_pop = np.array((URM_train > 0).sum(axis=0)).flatten()
+        unpopular_items = np.where(item_pop <= unpopular_threshold)[0]
 
-            # set the "currentItem"-th column of URM_train to zero
-            start_pos = URM_train.indptr[currentItem]
-            end_pos = URM_train.indptr[currentItem + 1]
+        for curr_item in tqdm(range(n_items), desc="{}: Computing W_sparse matrix".format(self.RECOMMENDER_NAME)):
+            # get the target column
+            target_column = URM_train[:, curr_item].toarray()
+
+            # set the "curr_item"-th column of URM_train to zero
+            start_pos = URM_train.indptr[curr_item]
+            end_pos = URM_train.indptr[curr_item + 1]
             current_item_data_backup = URM_train.data[start_pos: end_pos].copy()
             URM_train.data[start_pos: end_pos] = 0.0
 
@@ -87,25 +97,31 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             bqm = dimod.binary_quadratic_model.BQM.from_numpy_matrix(qubo, offset=0)
             bqm.relabel_variables(mapping=mapping)
 
-            self._print("The BQM for item {} is {}".format(currentItem, bqm))
+            if remove_unpopular_items:
+                bqm.fix_variables({"a{:02d}".format(i): 0 for i in unpopular_items})
+
+            self._print("The BQM for item {} is {}".format(curr_item, bqm))
 
             # solve the problem with the solver
             if type(self.solver) is EmbeddingComposite or type(self.solver) is LazyFixedEmbeddingComposite:
                 chain_strength = max(min_chain_strength,
                                      chain_multiplier * np.abs((np.max(qubo) - np.min(qubo))))
-                response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
+                response = self.solver.sample(bqm, chain_strength=chain_strength, auto_scale=True, **solver_parameters)
             else:
                 response = self.solver.sample(bqm, **solver_parameters)
 
-            self._print("The response for item {} is {}".format(currentItem, response.aggregate()))
+            self._print("The response for item {} is {}".format(curr_item, response.aggregate()))
             if type(self.solver) is EmbeddingComposite or type(self.solver) is LazyFixedEmbeddingComposite:
                 self._print("Break chain percentage of item {} is {}"
-                            .format(currentItem, list(response.data(fields=["chain_break_fraction"]))))
+                            .format(curr_item, list(response.data(fields=["chain_break_fraction"]))))
 
             # save response in self.responses
             response_df = response.to_pandas_dataframe()
-            response_df["a{:02d}".format(currentItem)] = 0.0
-            response_df["item_id"] = currentItem
+            response_df["a{:02d}".format(curr_item)] = 0.0
+            if remove_unpopular_items:
+                for i in unpopular_items:
+                    response_df["a{:02d}".format(i)] = 0.0
+            response_df["item_id"] = curr_item
             if self.df_responses is None:
                 self.df_responses = response_df
                 self.df_responses = self.df_responses.reindex(sorted(self.df_responses.columns), axis=1)
