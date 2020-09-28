@@ -24,15 +24,19 @@ if __name__ == '__main__':
 
     df = pd.DataFrame(columns=["Datetime", "Algorithm", "Solver", "Loss", "AggregationStrategy",
                                "FilterStrategy", "TopFilterValue", "TopK", "NumReads",
-                               "ConstraintMultiplier", "ChainMultiplier", "Cached",
-                               "PRECISION", "RECALL", "MAP", "NDCG", "AVERAGE_POPULARITY", "DIVERSITY_MEAN_INTER_LIST",
-                               "COVERAGE_ITEM", "CHAIN_BREAK_FRACTION_MAX", "CHAIN_BREAK_FRACTION_MEAN",
-                               "CHAIN_BREAK_FRACTION_STD"])
+                               "AlphaMultiplier",
+                               "ConstraintMultiplier", "ChainMultiplier", "UnpopularThreshold",
+                               "Cached", "PRECISION", "RECALL", "MAP", "NDCG", "AVERAGE_POPULARITY",
+                               "DIVERSITY_MEAN_INTER_LIST", "COVERAGE_ITEM", "CHAIN_BREAK_FRACTION_MAX",
+                               "CHAIN_BREAK_FRACTION_MEAN", "CHAIN_BREAK_FRACTION_STD"])
 
     for filepath in report_files:
         parameter_values = {}
         parameter_values["ChainMultiplier"] = 1.0
         parameter_values["ConstraintMultiplier"] = 1.0
+        parameter_values["AlphaMultiplier"] = 0.0
+        parameter_values["RemoveUnpopularity"] = "None"
+        parameter_values["UnpopularThreshold"] = 0
         parameter_values["Cached"] = "No"
         parameter_values["CHAIN_BREAK_FRACTION_MAX"] = ""
         parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = ""
@@ -58,10 +62,16 @@ if __name__ == '__main__':
                     parameter_values["NumReads"] = line.split(": ")[-1]
                 elif line.find("Constraint") != -1:
                     parameter_values["ConstraintMultiplier"] = line.split(": ")[-1]
+                elif line.find("Alpha") != -1:
+                    parameter_values["AlphaMultiplier"] = line.split(": ")[-1]
                 elif line.find("Chain") != -1:
                     parameter_values["ChainMultiplier"] = line.split(": ")[-1]
                 elif line.find("following results") != -1:
                     parameter_values["Cached"] = line.split(" ")[-1]
+                elif line.find("Remove unpopular items") != -1:
+                    parameter_values["RemoveUnpopularity"] = line.split(" ")[-1]
+                elif line.find("Unpopular threshold") != -1:
+                    parameter_values["UnpopularThreshold"] = line.split(" ")[-1]
                 elif line.find("ROC_AUC") != -1:
                     results = json.loads(line[3:-1].replace("\'", "\""))
 
@@ -72,8 +82,17 @@ if __name__ == '__main__':
             parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = np.mean(samples_df["chain_break_fraction"])
             parameter_values["CHAIN_BREAK_FRACTION_STD"] = np.std(samples_df["chain_break_fraction"])
 
+        if parameter_values["Solver"] == "LAZY_QPU":
+            parameter_values["Solver"] = "FIXED_QPU"
+
         if parameter_values["FilterStrategy"] == "NONE":
             parameter_values["TopFilterValue"] = ""
+
+        if parameter_values["Solver"] == "SA":
+            parameter_values["ChainMultiplier"] = ""
+
+        if parameter_values["RemoveUnpopularity"] == "False":
+            parameter_values["UnpopularThreshold"] = 0
 
         df = df.append({
             "Datetime": filepath.split("/")[-2],
@@ -85,8 +104,11 @@ if __name__ == '__main__':
             "TopFilterValue": parameter_values["TopFilterValue"],
             "TopK": parameter_values["TopK"],
             "NumReads": parameter_values["NumReads"],
+            "AlphaMultiplier": parameter_values["AlphaMultiplier"],
             "ConstraintMultiplier": parameter_values["ConstraintMultiplier"],
             "ChainMultiplier": parameter_values["ChainMultiplier"],
+            "UnpopularThreshold": parameter_values["UnpopularThreshold"],
+            "QUBORoundPercentage": parameter_values["QUBORoundPercentage"],
             "Cached": parameter_values["Cached"],
             "PRECISION": results["PRECISION"],
             "RECALL": results["RECALL"],

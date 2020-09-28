@@ -2,6 +2,7 @@ notebook/
 report/bugged_quantum_slim
 report/quantum_slim
 report/quantum_slim_final_report/quantum_slim
+report/search_top_k_and_constr_mlt
 data/
 .idea/
 scripts/experiments/Data_manager_split_datasets

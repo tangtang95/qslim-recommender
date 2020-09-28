@@ -1,9 +1,11 @@
 import argparse
+import multiprocessing
 import os
 
 import neal
 import numpy as np
 import pandas as pd
+from dwave.embedding.chimera import find_clique_embedding
 from dwave.system import LazyFixedEmbeddingComposite
 from dwave.system.composites import EmbeddingComposite
 from dwave.system.samplers import DWaveSampler
@@ -13,6 +15,7 @@ from course_lib.Data_manager.DataSplitter_k_fold import DataSplitter_Warm_k_fold
 from src.data.NoHeaderCSVReader import NoHeaderCSVReader
 from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
 from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
+from src.models.QuantumSLIM.Losses.NormMeanErrorLoss import NormMeanErrorLoss
 from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
 from src.models.QuantumSLIM.Aggregators.AggregatorFirst import AggregatorFirst
 from src.models.QuantumSLIM.Aggregators.AggregatorUnion import AggregatorUnion
@@ -21,8 +24,9 @@ from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
 from src.models.QuantumSLIM.Losses.NormMSELoss import NormMSELoss
 from src.utils.utilities import handle_folder_creation, get_project_root_path, str2bool
 
-SOLVER_NAMES = ["QPU", "SA", "LAZY_QPU"]
-LOSS_NAMES = ["MSE", "NORM_MSE", "NON_ZERO_MSE", "NON_ZERO_NORM_MSE", "SIM_NORM_MSE", "SIM_NON_ZERO_NORM_MSE"]
+SOLVER_NAMES = ["QPU", "SA", "FIXED_QPU", "CLIQUE_FIXED_QPU"]
+LOSS_NAMES = ["MSE", "NORM_MSE", "NON_ZERO_MSE", "NON_ZERO_NORM_MSE", "SIM_NORM_MSE", "SIM_NON_ZERO_NORM_MSE",
+              "NORM_MEAN_ERROR", "NORM_MEAN_ERROR_SQUARED"]
 AGGREGATION_NAMES = ["FIRST", "LOG", "LOG_FIRST", "EXP", "EXP_FIRST", "AVG", "AVG_FIRST", "WEIGHTED_AVG",
                      "WEIGHTED_AVG_FIRST"]
 FILTER_NAMES = ["NONE", "TOP"]
@@ -39,10 +43,12 @@ DEFAULT_FILTER_TOP_VALUE = 0.2
 
 # FIT DEFAULT VALUES
 DEFAULT_TOP_K = 5
+DEFAULT_ALPHA_MULTIPLIER = 0.0
 DEFAULT_NUM_READS = 50
 DEFAULT_MULTIPLIER = 1.0
 DEFAULT_REMOVE_UNPOPULAR_ITEMS = False
-DEFAULT_UNPOPULAR_THRESHOLD = 4  # it removes items with less and equal than this
+DEFAULT_UNPOPULAR_THRESHOLD = 0
+DEFAULT_ROUND_PERCENTAGE = 1.0
 
 # OTHERS
 DEFAULT_CUTOFF = 5
@@ -85,6 +91,8 @@ def get_arguments():
     # Quantum SLIM Fit setting
     parser.add_argument("-k", "--top_k", help="Number of similar item selected for each item", type=int,
                         default=DEFAULT_TOP_K)
+    parser.add_argument("-am", "--alpha_mlt", help="Alpha multiplier of the linear sparsity regulator term", type=float,
+                        default=DEFAULT_ALPHA_MULTIPLIER)
     parser.add_argument("-nr", "--num_reads", help="Number of reads to be done for each sample call of the solver",
                         type=int, default=DEFAULT_NUM_READS)
     parser.add_argument("-com", "--constr_mlt", help="Constraint multiplier of the QUBO that fixes the selection"
@@ -92,13 +100,11 @@ def get_arguments():
                         type=float, default=DEFAULT_MULTIPLIER)
     parser.add_argument("-chm", "--chain_mlt", help="Chain multiplier of the auto-embedding component",
                         type=float, default=DEFAULT_MULTIPLIER)
-    parser.add_argument("-ru", "--rm_unpop", help="Whether to simplify the problem QUBO by removing unpopular items to"
-                                                  "the variables",
-                        type=str2bool,
-                        default=DEFAULT_REMOVE_UNPOPULAR_ITEMS)
     parser.add_argument("-ut", "--unpop_thresh", help="The threshold of unpopularity for the removal of unpopular "
                                                       "items",
                         type=int, default=DEFAULT_UNPOPULAR_THRESHOLD)
+    parser.add_argument("-qrp", "--qubo_round_perc", help="The round percentage to apply on qubo values",
+                        type=float, default=DEFAULT_ROUND_PERCENTAGE)
 
     # Evaluation setting
     parser.add_argument("-c", "--cutoff", help="Cutoff value for evaluation", type=int,
@@ -123,9 +129,17 @@ def get_solver(solver_name, token):
     elif solver_name == "QPU":
         solver = DWaveSampler(token=token)
         solver = EmbeddingComposite(solver)
-    elif solver_name == "LAZY_QPU":
+    elif solver_name == "FIXED_QPU":
         solver = DWaveSampler(token=token)
         solver = LazyFixedEmbeddingComposite(solver)
+    elif solver_name == "CLIQUE_FIXED_QPU":
+
+        def get_clique_embedding(S, T):
+            var_names = sorted(set([couple[0] for couple in S]))
+            return find_clique_embedding(k=var_names, m=16, target_edges=T)
+
+        solver = DWaveSampler(token=token)
+        solver = LazyFixedEmbeddingComposite(solver, find_embedding=get_clique_embedding)
     else:
         raise NotImplementedError("Solver {} is not implemented".format(solver_name))
     return solver
@@ -144,6 +158,10 @@ def get_loss(loss_name):
         loss_fn = NormMSELoss(only_positive=False, is_simplified=True)
     elif loss_name == "SIM_NON_ZERO_NORM_MSE":
         loss_fn = NormMSELoss(only_positive=True, is_simplified=True)
+    elif loss_name == "NORM_MEAN_ERROR":
+        loss_fn = NormMeanErrorLoss(only_positive=False, is_squared=False)
+    elif loss_name == "NORM_MEAN_ERROR_SQUARED":
+        loss_fn = NormMeanErrorLoss(only_positive=False, is_squared=True)
     else:
         raise NotImplementedError("Loss function {} is not implemented".format(loss_name))
     return loss_fn
@@ -202,8 +220,8 @@ def run_experiment(args):
                             filter_strategy=filter_strategy, verbose=args.verbose)
 
     if args.foldername is None:
-        model.fit(topK=args.top_k, num_reads=args.num_reads, constraint_multiplier=args.constr_mlt,
-                  chain_multiplier=args.chain_mlt, remove_unpopular_items=args.rm_unpop,
+        model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, num_reads=args.num_reads,
+                  constraint_multiplier=args.constr_mlt, chain_multiplier=args.chain_mlt,
                   unpopular_threshold=args.unpop_thresh)
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
@@ -213,66 +231,72 @@ def run_experiment(args):
     return model, evaluator.evaluateRecommender(model)[0]
 
 
+def save_result(args):
+    # Set up writing folder and file
+    fd, folder_path_with_date = handle_folder_creation(result_path=args.output_folder)
+
+    # Save model
+    mdl.save_model(folder_path=folder_path_with_date)
+    if args.foldername is None:
+        mdl.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
+    else:
+        cache_results_filepath = os.path.join(args.output_folder, args.foldername, "results.txt")
+        with open(cache_results_filepath, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.rstrip()
+                if line.find("Solver") != -1:
+                    args.solver = line.split(": ")[-1]
+                elif line.find("Loss") != -1:
+                    args.loss = line.split(": ")[-1]
+                elif line.find("Top K") != -1:
+                    args.top_k = line.split(": ")[-1]
+                elif line.find("Number of reads") != -1:
+                    args.num_reads = line.split(": ")[-1]
+                elif line.find("Constraint") != -1:
+                    args.constr_mlt = line.split(": ")[-1]
+                elif line.find("Chain") != -1:
+                    args.chain_mlt = line.split(": ")[-1]
+                elif line.find("Remove unpopular items") != -1:
+                    args.rm_unpop = line.split(": ")[-1]
+                elif line.find("Unpopular threshold") != -1:
+                    args.unpop_thresh = line.split(": ")[-1]
+
+    fd.write("--- Quantum SLIM Experiment ---\n")
+    fd.write("\n")
+
+    fd.write("CONSTRUCTOR PARAMETERS\n")
+    fd.write(" - Solver: {}\n".format(args.solver))
+    fd.write(" - Loss function: {}\n".format(args.loss))
+    fd.write(" - Aggregation strategy: {}\n".format(args.aggregation))
+    fd.write(" - Filter strategy: {}\n".format(args.filter))
+    fd.write(" - Top filter value: {}\n".format(args.top_filter))
+    fd.write("\n")
+
+    fd.write("FIT PARAMETERS\n")
+    fd.write(" - Top K: {}\n".format(args.top_k))
+    fd.write(" - Number of reads: {}\n".format(args.num_reads))
+    fd.write(" - Alpha multiplier: {}\n".format(args.alpha_mlt))
+    fd.write(" - Constraint multiplier: {}\n".format(args.constr_mlt))
+    fd.write(" - Chain multiplier: {}\n".format(args.chain_mlt))
+    fd.write(" - Unpopular threshold: {}\n".format(args.unpop_thresh))
+    fd.write("\n")
+
+    fd.write("- Results -\n")
+    if args.foldername is not None:
+        fd.write("The following results comes from the solver_responses.csv of folder {}\n"
+                 .format(args.foldername))
+    fd.write(str(result))
+
+    fd.close()
+
+
 if __name__ == '__main__':
     arguments = get_arguments()
-    model, result = run_experiment(arguments)
+    mdl, result = run_experiment(arguments)
     print("Results: {}".format(str(result)))
 
     if arguments.save_result:
-        # Set up writing folder and file
-        fd, folder_path_with_date = handle_folder_creation(result_path=arguments.output_folder)
+        save_result(arguments)
 
-        # Save model
-        model.save_model(folder_path=folder_path_with_date)
-        if arguments.foldername is None:
-            model.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
-        else:
-            cache_results_filepath = os.path.join(arguments.output_folder, arguments.foldername, "results.txt")
-            with open(cache_results_filepath, 'r') as f:
-                lines = f.readlines()
-                for line in lines:
-                    line = line.rstrip()
-                    if line.find("Solver") != -1:
-                        arguments.solver = line.split(": ")[-1]
-                    elif line.find("Loss") != -1:
-                        arguments.loss = line.split(": ")[-1]
-                    elif line.find("Top K") != -1:
-                        arguments.top_k = line.split(": ")[-1]
-                    elif line.find("Number of reads") != -1:
-                        arguments.num_reads = line.split(": ")[-1]
-                    elif line.find("Constraint") != -1:
-                        arguments.constr_mlt = line.split(": ")[-1]
-                    elif line.find("Chain") != -1:
-                        arguments.chain_mlt = line.split(": ")[-1]
-                    elif line.find("Remove unpopular items") != -1:
-                        arguments.rm_unpop = line.split(": ")[-1]
-                    elif line.find("Unpopular threshold") != -1:
-                        arguments.unpop_thresh = line.split(": ")[-1]
 
-        fd.write("--- Quantum SLIM Experiment ---\n")
-        fd.write("\n")
-
-        fd.write("CONSTRUCTOR PARAMETERS\n")
-        fd.write(" - Solver: {}\n".format(arguments.solver))
-        fd.write(" - Loss function: {}\n".format(arguments.loss))
-        fd.write(" - Aggregation strategy: {}\n".format(arguments.aggregation))
-        fd.write(" - Filter strategy: {}\n".format(arguments.filter))
-        fd.write(" - Top filter value: {}\n".format(arguments.top_filter))
-        fd.write("\n")
-
-        fd.write("FIT PARAMETERS\n")
-        fd.write(" - Top K: {}\n".format(arguments.top_k))
-        fd.write(" - Number of reads: {}\n".format(arguments.num_reads))
-        fd.write(" - Constraint multiplier: {}\n".format(arguments.constr_mlt))
-        fd.write(" - Chain multiplier: {}\n".format(arguments.chain_mlt))
-        fd.write(" - Remove unpopular items: {}\n".format(arguments.rm_unpop))
-        fd.write(" - Unpopular threshold: {}\n".format(arguments.unpop_thresh))
-        fd.write("\n")
-
-        fd.write("- Results -\n")
-        if arguments.foldername is not None:
-            fd.write("The following results comes from the solver_responses.csv of folder {}\n"
-                     .format(arguments.foldername))
-        fd.write(str(result))
-
-        fd.close()

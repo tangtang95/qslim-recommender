@@ -12,10 +12,10 @@ if __name__ == '__main__':
     df = pd.read_csv(filepath_or_buffer=input_filepath, sep="\t", header=None)
 
     item_indices = df[1].unique()
-    item_chosen = np.random.choice(item_indices, 50, replace=False)
+    item_chosen = np.random.choice(item_indices, 250, replace=False)
     small_df = df[df[1].isin(item_chosen)]
 
-    output_filepath = os.path.join(data_path, "small_ml100k.csv")
+    output_filepath = os.path.join(data_path, "medium_ml100k.csv")
     small_df.to_csv(output_filepath, header=False, index=False)
 
     item_chosen_filepath = os.path.join(data_path, "item_chosen.txt")

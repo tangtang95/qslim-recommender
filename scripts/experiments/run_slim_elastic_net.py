@@ -13,7 +13,5 @@ if __name__ == '__main__':
     model = SLIMElasticNetRecommender(URM_train)
     model.fit(topK=5)
 
-    print(model.W_sparse)
-
     evaluator = EvaluatorHoldout(URM_val, cutoff_list=[5])
     print(evaluator.evaluateRecommender(model))
