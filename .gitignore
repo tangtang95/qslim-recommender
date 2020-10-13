@@ -1,5 +1,6 @@
 notebook/
 report/bugged_quantum_slim
+report/old_qslim_on_small_ml100k
 report/quantum_slim
 report/quantum_slim_final_report/quantum_slim
 report/search_top_k_and_constr_mlt

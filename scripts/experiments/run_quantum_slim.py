@@ -8,7 +8,7 @@ import pandas as pd
 from dwave.embedding.chimera import find_clique_embedding
 from dwave.system import LazyFixedEmbeddingComposite
 from dwave.system.composites import EmbeddingComposite
-from dwave.system.samplers import DWaveSampler
+from dwave.system.samplers import DWaveSampler, DWaveCliqueSampler, LeapHybridSampler
 
 from course_lib.Base.Evaluation.Evaluator import EvaluatorHoldout
 from course_lib.Data_manager.DataSplitter_k_fold import DataSplitter_Warm_k_fold
@@ -24,7 +24,11 @@ from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
 from src.models.QuantumSLIM.Losses.NormMSELoss import NormMSELoss
 from src.utils.utilities import handle_folder_creation, get_project_root_path, str2bool
 
-SOLVER_NAMES = ["QPU", "SA", "FIXED_QPU", "CLIQUE_FIXED_QPU"]
+
+SOLVER_TYPE_LIST = ["QPU", "SA", "HYBRID", "FIXED_QPU", "CLIQUE_FIXED_QPU"]
+SOLVER_NAME_LIST = ["DW_2000Q", "ADVANTAGE", "HYBRID_V1", "HYBRID_V2"]
+QPU_SOLVER_NAME_LIST = SOLVER_NAME_LIST[:2]
+HYBRID_SOLVER_NAME_LIST = SOLVER_NAME_LIST[2:4]
 LOSS_NAMES = ["MSE", "NORM_MSE", "NON_ZERO_MSE", "NON_ZERO_NORM_MSE", "SIM_NORM_MSE", "SIM_NON_ZERO_NORM_MSE",
               "NORM_MEAN_ERROR", "NORM_MEAN_ERROR_SQUARED"]
 AGGREGATION_NAMES = ["FIRST", "LOG", "LOG_FIRST", "EXP", "EXP_FIRST", "AVG", "AVG_FIRST", "WEIGHTED_AVG",
@@ -35,8 +39,9 @@ FILTER_NAMES = ["NONE", "TOP"]
 DEFAULT_N_FOLDS = 5
 
 # CONSTRUCTOR DEFAULT VALUES
-DEFAULT_SOLVER = "SA"
-DEFAULT_LOSS = "MSE"
+DEFAULT_SOLVER_TYPE = "SA"
+DEFAULT_SOLVER_NAME = ""
+DEFAULT_LOSS = "NORM_MSE"
 DEFAULT_AGGREGATION = "FIRST"
 DEFAULT_FILTER = "NONE"
 DEFAULT_FILTER_TOP_VALUE = 0.2
@@ -46,9 +51,7 @@ DEFAULT_TOP_K = 5
 DEFAULT_ALPHA_MULTIPLIER = 0.0
 DEFAULT_NUM_READS = 50
 DEFAULT_MULTIPLIER = 1.0
-DEFAULT_REMOVE_UNPOPULAR_ITEMS = False
 DEFAULT_UNPOPULAR_THRESHOLD = 0
-DEFAULT_ROUND_PERCENTAGE = 1.0
 
 # OTHERS
 DEFAULT_CUTOFF = 5
@@ -76,8 +79,10 @@ def get_arguments():
                                                     "used", type=str)
 
     # Quantum SLIM setting
-    parser.add_argument("-s", "--solver", help="Solver used for Quantum SLIM", choices=SOLVER_NAMES, type=str,
-                        default=DEFAULT_SOLVER)
+    parser.add_argument("-st", "--solver_type", help="Type of solver used for Quantum SLIM", choices=SOLVER_TYPE_LIST,
+                        type=str, default=DEFAULT_SOLVER_TYPE)
+    parser.add_argument("-sn", "--solver_name", help="Name of the solver to be used", choices=SOLVER_NAME_LIST,
+                        type=str, default=DEFAULT_SOLVER_NAME)
     parser.add_argument("-l", "--loss", help="Loss function to use in Quantum SLIM", choices=LOSS_NAMES,
                         type=str, default=DEFAULT_LOSS)
     parser.add_argument("-g", "--aggregation", help="Type of aggregation to use on the response of Quantum SLIM solver",
@@ -103,8 +108,6 @@ def get_arguments():
     parser.add_argument("-ut", "--unpop_thresh", help="The threshold of unpopularity for the removal of unpopular "
                                                       "items",
                         type=int, default=DEFAULT_UNPOPULAR_THRESHOLD)
-    parser.add_argument("-qrp", "--qubo_round_perc", help="The round percentage to apply on qubo values",
-                        type=float, default=DEFAULT_ROUND_PERCENTAGE)
 
     # Evaluation setting
     parser.add_argument("-c", "--cutoff", help="Cutoff value for evaluation", type=int,
@@ -123,25 +126,28 @@ def get_arguments():
     return parser.parse_args()
 
 
-def get_solver(solver_name, token):
-    if solver_name == "SA":
+def get_solver(solver_type: str, solver_name: str, token):
+    filters = {}
+    if solver_type.endswith("QPU") and solver_name in QPU_SOLVER_NAME_LIST:
+        filters["topology__type"] = "pegasus" if solver_name == "ADVANTAGE" else "chimera"
+        filters["name__contains"] = "Advantage_system" if solver_name == "ADVANTAGE" else "DW_2000Q"
+    if solver_type.endswith("HYBRID") and solver_name in HYBRID_SOLVER_NAME_LIST:
+        filters["name__contains"] = "version2" if solver_name == "HYBRID_V2" else "v1"
+
+    if solver_type == "SA":
         solver = neal.SimulatedAnnealingSampler()
-    elif solver_name == "QPU":
-        solver = DWaveSampler(token=token)
+    elif solver_type == "QPU":
+        solver = DWaveSampler(client="qpu", solver=filters, token=token)
         solver = EmbeddingComposite(solver)
-    elif solver_name == "FIXED_QPU":
-        solver = DWaveSampler(token=token)
+    elif solver_type == "HYBRID":
+        solver = LeapHybridSampler(solver=filters, token=token)
+    elif solver_type == "FIXED_QPU":
+        solver = DWaveSampler(client="qpu", solver=filters, token=token)
         solver = LazyFixedEmbeddingComposite(solver)
-    elif solver_name == "CLIQUE_FIXED_QPU":
-
-        def get_clique_embedding(S, T):
-            var_names = sorted(set([couple[0] for couple in S]))
-            return find_clique_embedding(k=var_names, m=16, target_edges=T)
-
-        solver = DWaveSampler(token=token)
-        solver = LazyFixedEmbeddingComposite(solver, find_embedding=get_clique_embedding)
+    elif solver_type == "CLIQUE_FIXED_QPU":
+        solver = DWaveCliqueSampler(client="qpu", solver=filters, token=token)
     else:
-        raise NotImplementedError("Solver {} is not implemented".format(solver_name))
+        raise NotImplementedError("Solver {} is not implemented".format(solver_type))
     return solver
 
 
@@ -206,13 +212,15 @@ def get_filter_strategy(filter_name, top_filter_value):
 
 
 def run_experiment(args):
+    np.random.seed(52316)
+
     reader = NoHeaderCSVReader(filename=args.filename)
     splitter = DataSplitter_Warm_k_fold(reader, n_folds=args.n_folds)
     splitter.load_data()
 
     URM_train, URM_val, URM_test = splitter.get_holdout_split()
 
-    solver = get_solver(args.solver, args.token)
+    solver = get_solver(args.solver_type, args.solver_name, args.token)
     loss_fn = get_loss(args.loss)
     agg_strategy = get_aggregation_strategy(args.aggregation)
     filter_strategy = get_filter_strategy(args.filter, args.top_filter)
@@ -220,9 +228,11 @@ def run_experiment(args):
                             filter_strategy=filter_strategy, verbose=args.verbose)
 
     if args.foldername is None:
-        model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, num_reads=args.num_reads,
-                  constraint_multiplier=args.constr_mlt, chain_multiplier=args.chain_mlt,
-                  unpopular_threshold=args.unpop_thresh)
+        kwargs = {}
+        if args.num_reads > 0:
+            kwargs["num_reads"] = args.num_reads
+        model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
+                  chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh, **kwargs)
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
         model.W_sparse = model.build_similarity_matrix(df_responses=responses_df)
@@ -231,22 +241,24 @@ def run_experiment(args):
     return model, evaluator.evaluateRecommender(model)[0]
 
 
-def save_result(args):
+def save_result(model, exp_result, args):
     # Set up writing folder and file
     fd, folder_path_with_date = handle_folder_creation(result_path=args.output_folder)
 
     # Save model
-    mdl.save_model(folder_path=folder_path_with_date)
+    model.save_model(folder_path=folder_path_with_date)
     if args.foldername is None:
-        mdl.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
+        model.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
     else:
         cache_results_filepath = os.path.join(args.output_folder, args.foldername, "results.txt")
         with open(cache_results_filepath, 'r') as f:
             lines = f.readlines()
             for line in lines:
                 line = line.rstrip()
-                if line.find("Solver") != -1:
-                    args.solver = line.split(": ")[-1]
+                if line.find("Solver: ") != -1:
+                    args.solver_type = line.split(": ")[-1]
+                elif line.find("Solver name") != -1:
+                    args.solver_name = line.split(": ")[-1]
                 elif line.find("Loss") != -1:
                     args.loss = line.split(": ")[-1]
                 elif line.find("Top K") != -1:
@@ -265,8 +277,13 @@ def save_result(args):
     fd.write("--- Quantum SLIM Experiment ---\n")
     fd.write("\n")
 
+    fd.write("DATASET INFO\n")
+    fd.write("Dataset name: {}\n".format(args.filename))
+    fd.write("\n")
+
     fd.write("CONSTRUCTOR PARAMETERS\n")
-    fd.write(" - Solver: {}\n".format(args.solver))
+    fd.write(" - Solver: {}\n".format(args.solver_type))
+    fd.write(" - Solver name: {}\n".format(args.solver_name))
     fd.write(" - Loss function: {}\n".format(args.loss))
     fd.write(" - Aggregation strategy: {}\n".format(args.aggregation))
     fd.write(" - Filter strategy: {}\n".format(args.filter))
@@ -286,7 +303,7 @@ def save_result(args):
     if args.foldername is not None:
         fd.write("The following results comes from the solver_responses.csv of folder {}\n"
                  .format(args.foldername))
-    fd.write(str(result))
+    fd.write(str(exp_result))
 
     fd.close()
 
@@ -297,6 +314,6 @@ if __name__ == '__main__':
     print("Results: {}".format(str(result)))
 
     if arguments.save_result:
-        save_result(arguments)
+        save_result(mdl, result, arguments)
 
 

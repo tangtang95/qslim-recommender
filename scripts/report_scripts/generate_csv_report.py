@@ -22,7 +22,7 @@ if __name__ == '__main__':
     solver_values = []
     loss_values = []
 
-    df = pd.DataFrame(columns=["Datetime", "Algorithm", "Solver", "Loss", "AggregationStrategy",
+    df = pd.DataFrame(columns=["Datetime", "Algorithm", "SolverType", "SolverName", "Loss", "AggregationStrategy",
                                "FilterStrategy", "TopFilterValue", "TopK", "NumReads",
                                "AlphaMultiplier",
                                "ConstraintMultiplier", "ChainMultiplier", "UnpopularThreshold",
@@ -32,6 +32,7 @@ if __name__ == '__main__':
 
     for filepath in report_files:
         parameter_values = {}
+        parameter_values["SolverName"] = ""
         parameter_values["ChainMultiplier"] = 1.0
         parameter_values["ConstraintMultiplier"] = 1.0
         parameter_values["AlphaMultiplier"] = 0.0
@@ -46,8 +47,10 @@ if __name__ == '__main__':
             lines = f.readlines()
             for line in lines:
                 line = line.rstrip()
-                if line.find("Solver") != -1:
-                    parameter_values["Solver"] = line.split(": ")[-1]
+                if line.find("Solver: ") != -1:
+                    parameter_values["SolverType"] = line.split(": ")[-1]
+                elif line.find("Solver name") != -1:
+                    parameter_values["SolverName"] = line.split(": ")[-1]
                 elif line.find("Loss") != -1:
                     parameter_values["Loss"] = line.split(": ")[-1]
                 elif line.find("Aggregation") != -1:
@@ -75,20 +78,24 @@ if __name__ == '__main__':
                 elif line.find("ROC_AUC") != -1:
                     results = json.loads(line[3:-1].replace("\'", "\""))
 
-        if parameter_values["Solver"].endswith("QPU") and parameter_values["Cached"] == "No":
+        if parameter_values["SolverType"].endswith("QPU") and parameter_values["Cached"] == "No":
             samples_filepath = os.path.join("/".join(filepath.split("/")[:-1]), "solver_responses.csv")
             samples_df = pd.read_csv(samples_filepath)
             parameter_values["CHAIN_BREAK_FRACTION_MAX"] = samples_df["chain_break_fraction"].max()
             parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = np.mean(samples_df["chain_break_fraction"])
             parameter_values["CHAIN_BREAK_FRACTION_STD"] = np.std(samples_df["chain_break_fraction"])
 
-        if parameter_values["Solver"] == "LAZY_QPU":
-            parameter_values["Solver"] = "FIXED_QPU"
+        if parameter_values["SolverType"] == "LAZY_QPU":
+            parameter_values["SolverType"] = "FIXED_QPU"
+
+        if parameter_values["SolverType"].endswith("QPU") and parameter_values["SolverName"] == "":
+            parameter_values["SolverName"] = "DW_2000Q"
 
         if parameter_values["FilterStrategy"] == "NONE":
             parameter_values["TopFilterValue"] = ""
 
-        if parameter_values["Solver"] == "SA":
+        if parameter_values["SolverType"] == "SA":
+            parameter_values["SolverName"] = ""
             parameter_values["ChainMultiplier"] = ""
 
         if parameter_values["RemoveUnpopularity"] == "False":
@@ -97,7 +104,8 @@ if __name__ == '__main__':
         df = df.append({
             "Datetime": filepath.split("/")[-2],
             "Algorithm": "Quantum SLIM",
-            "Solver": parameter_values["Solver"],
+            "SolverType": parameter_values["SolverType"],
+            "SolverName": parameter_values["SolverName"],
             "Loss": parameter_values["Loss"],
             "AggregationStrategy": parameter_values["AggregationStrategy"],
             "FilterStrategy": parameter_values["FilterStrategy"],
@@ -108,7 +116,6 @@ if __name__ == '__main__':
             "ConstraintMultiplier": parameter_values["ConstraintMultiplier"],
             "ChainMultiplier": parameter_values["ChainMultiplier"],
             "UnpopularThreshold": parameter_values["UnpopularThreshold"],
-            "QUBORoundPercentage": parameter_values["QUBORoundPercentage"],
             "Cached": parameter_values["Cached"],
             "PRECISION": results["PRECISION"],
             "RECALL": results["RECALL"],

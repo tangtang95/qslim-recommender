@@ -4,7 +4,7 @@ import scipy.sparse as sps
 import pandas as pd
 from dwave.embedding import MinimizeEnergy
 from dwave.embedding.chimera import find_clique_embedding
-from dwave.system import EmbeddingComposite
+from dwave.system import EmbeddingComposite, DWaveCliqueSampler
 from tqdm import tqdm
 
 from course_lib.Base.BaseSimilarityMatrixRecommender import BaseItemSimilarityMatrixRecommender
@@ -28,7 +28,7 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
 
     MIN_CONSTRAINT_STRENGTH = 10
 
-    def __init__(self, URM_train, solver, agg_strategy: AggregatorInterface = AggregatorFirst(),
+    def __init__(self, URM_train, solver: dimod.Sampler, agg_strategy: AggregatorInterface = AggregatorFirst(),
                  transform_fn: LossInterface = MSELoss(only_positive=False),
                  filter_strategy: FilterStrategy = NoFilter(), verbose=True):
         super(QuantumSLIM_MSE, self).__init__(URM_train, verbose=verbose)
@@ -110,7 +110,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             # get BQM/QUBO problem for the current item
             qubo = self.transform_fn.get_qubo_problem(URM_train, target_column)
             qubo = np.round(qubo * qubo_round_percentage)
-            qubo = qubo + alpha_multiplier * (np.max(qubo) - np.min(qubo)) * np.identity(n_items)
+            qubo = qubo + (np.log1p(item_pop[curr_item])**2 + 1) * alpha_multiplier * (np.max(qubo) - np.min(qubo))\
+                   * np.identity(n_items)
             if topK > -1:
                 constraint_strength = max(self.MIN_CONSTRAINT_STRENGTH,
                                           constraint_multiplier * (np.max(qubo) - np.min(qubo)))
@@ -125,11 +126,12 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             self._print("The BQM for item {} is {}".format(curr_item, bqm))
 
             # solve the problem with the solver
-            if issubclass(type(self.solver), EmbeddingComposite):
+            if ("child_properties" in self.solver.properties and
+                self.solver.properties["child_properties"]["category"] == "qpu") \
+                    or "qpu_properties" in self.solver.properties:
                 chain_strength = max(self.MIN_CONSTRAINT_STRENGTH,
                                      chain_multiplier * (np.max(qubo) - np.min(qubo)))
-                response = self.solver.sample(bqm, chain_strength=chain_strength, auto_scale=True, **solver_parameters,
-                                              chain_break_method=cbm)
+                response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
                 self._print("Break chain percentage of item {} is {}"
                             .format(curr_item, list(response.data(fields=["chain_break_fraction"]))))
             else:

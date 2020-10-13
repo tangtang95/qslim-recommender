@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+import numpy as np
 
 from course_lib.Data_manager.DataReader import DataReader
 from course_lib.Data_manager.IncrementalSparseMatrix import IncrementalSparseMatrix_FilterIDs
@@ -7,7 +8,7 @@ from src.utils.utilities import get_project_root_path
 
 
 def load_URM(file_path, separator):
-    URM_all_builder = IncrementalSparseMatrix_FilterIDs()
+    URM_all_builder = IncrementalSparseMatrix_FilterIDs(dtype=int)
 
     df_original = pd.read_csv(filepath_or_buffer=file_path, sep=separator, header=None,
                               usecols=[0, 1, 2],
@@ -43,7 +44,7 @@ class NoHeaderCSVReader(DataReader):
     def _load_from_original_file(self):
         # Load data from original file
 
-        print("RecSys2019Reader: Loading original data")
+        print("NoHeaderCSVReader: Loading original data")
 
         URM_all, self.item_original_ID_to_index, self.user_original_ID_to_index = load_URM(self.URM_path,
                                                                                            separator=',')
@@ -51,4 +52,4 @@ class NoHeaderCSVReader(DataReader):
         self._LOADED_GLOBAL_MAPPER_DICT["user_original_ID_to_index"] = self.user_original_ID_to_index
         self._LOADED_GLOBAL_MAPPER_DICT["item_original_ID_to_index"] = self.item_original_ID_to_index
 
-        print("RecSys2019Reader: loading complete")
+        print("NoHeaderCSVReader: loading complete")
