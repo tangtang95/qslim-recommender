@@ -14,7 +14,7 @@ if __name__ == '__main__':
     report_files = []
     for root, dirs, files in os.walk(REPORT_ROOT_PATH):
         for file in files:
-            if file.endswith(".txt"):
+            if file.endswith("results.txt"):
                 report_files.append(os.path.join(root, file))
 
     print(report_files)

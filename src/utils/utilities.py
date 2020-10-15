@@ -3,6 +3,29 @@ import os
 from datetime import datetime
 
 
+def cast_dict_elements(temp_dict):
+    def represents_int(s):
+        try:
+            int(s)
+            return True
+        except ValueError:
+            return False
+
+    def represents_float(s):
+        try:
+            float(s)
+            return True
+        except ValueError:
+            return False
+
+    for key, elem in temp_dict.items():
+        if represents_int(elem):
+            temp_dict[key] = int(elem)
+        elif represents_float(elem):
+            temp_dict[key] = float(elem)
+    return temp_dict
+
+
 def str2bool(v):
     if isinstance(v, bool):
        return v
@@ -14,12 +37,13 @@ def str2bool(v):
         raise argparse.ArgumentTypeError('Boolean value expected.')
 
 
-def handle_folder_creation(result_path: str, retrieve_text_file=True):
+def handle_folder_creation(result_path: str, filename="results.txt", retrieve_text_file=True):
     """
     Handle the creation of a folder and return a file in which it is possible to write in that folder, moreover
     it also returns the path to the result path with current datetime appended
 
     :param result_path: basic folder where to store results
+    :param filename: name of the result file to create
     :param retrieve_text_file: whether to retrieve a text file or not
     :return (descriptor to a file opened in write mode within result_path folder. The name of the file
     is result.txt, folder path with the date of the experiment). The file descriptor will be None
@@ -27,7 +51,7 @@ def handle_folder_creation(result_path: str, retrieve_text_file=True):
     """
     date_string = datetime.now().strftime('%b%d_%H-%M-%S/')
     output_folder_path = os.path.join(result_path, date_string)
-    output_file_name = output_folder_path + "results.txt"
+    output_file_name = output_folder_path + filename
     try:
         if not os.path.exists(output_folder_path):
             os.mkdir(output_folder_path)

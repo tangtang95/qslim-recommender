@@ -1,11 +1,9 @@
 import argparse
-import multiprocessing
 import os
 
 import neal
 import numpy as np
 import pandas as pd
-from dwave.embedding.chimera import find_clique_embedding
 from dwave.system import LazyFixedEmbeddingComposite
 from dwave.system.composites import EmbeddingComposite
 from dwave.system.samplers import DWaveSampler, DWaveCliqueSampler, LeapHybridSampler
@@ -13,17 +11,15 @@ from dwave.system.samplers import DWaveSampler, DWaveCliqueSampler, LeapHybridSa
 from course_lib.Base.Evaluation.Evaluator import EvaluatorHoldout
 from course_lib.Data_manager.DataSplitter_k_fold import DataSplitter_Warm_k_fold
 from src.data.NoHeaderCSVReader import NoHeaderCSVReader
-from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
-from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
-from src.models.QuantumSLIM.Losses.NormMeanErrorLoss import NormMeanErrorLoss
-from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
 from src.models.QuantumSLIM.Aggregators.AggregatorFirst import AggregatorFirst
 from src.models.QuantumSLIM.Aggregators.AggregatorUnion import AggregatorUnion
-
+from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
+from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
 from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
 from src.models.QuantumSLIM.Losses.NormMSELoss import NormMSELoss
+from src.models.QuantumSLIM.Losses.NormMeanErrorLoss import NormMeanErrorLoss
+from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
 from src.utils.utilities import handle_folder_creation, get_project_root_path, str2bool
-
 
 SOLVER_TYPE_LIST = ["QPU", "SA", "HYBRID", "FIXED_QPU", "CLIQUE_FIXED_QPU"]
 SOLVER_NAME_LIST = ["DW_2000Q", "ADVANTAGE", "HYBRID_V1", "HYBRID_V2"]
@@ -40,7 +36,7 @@ DEFAULT_N_FOLDS = 5
 
 # CONSTRUCTOR DEFAULT VALUES
 DEFAULT_SOLVER_TYPE = "SA"
-DEFAULT_SOLVER_NAME = ""
+DEFAULT_SOLVER_NAME = "NONE"
 DEFAULT_LOSS = "NORM_MSE"
 DEFAULT_AGGREGATION = "FIRST"
 DEFAULT_FILTER = "NONE"
@@ -211,7 +207,7 @@ def get_filter_strategy(filter_name, top_filter_value):
     return filter_strategy
 
 
-def run_experiment(args):
+def run_experiment(args, preload_df_responses=None):
     np.random.seed(52316)
 
     reader = NoHeaderCSVReader(filename=args.filename)
@@ -226,13 +222,19 @@ def run_experiment(args):
     filter_strategy = get_filter_strategy(args.filter, args.top_filter)
     model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, transform_fn=loss_fn, agg_strategy=agg_strategy,
                             filter_strategy=filter_strategy, verbose=args.verbose)
+    if preload_df_responses is not None:
+        model.preload_fit(preload_df_responses)
 
     if args.foldername is None:
         kwargs = {}
         if args.num_reads > 0:
             kwargs["num_reads"] = args.num_reads
-        model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
-                  chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh, **kwargs)
+        try:
+            model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
+                      chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh, **kwargs)
+        except OSError:
+            print("EXCEPTION: handling exception by saving the model up to now in order to resume it later")
+            return model, {}
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
         model.W_sparse = model.build_similarity_matrix(df_responses=responses_df)
@@ -241,44 +243,73 @@ def run_experiment(args):
     return model, evaluator.evaluateRecommender(model)[0]
 
 
+def parse_results_file(filepath, keep_pars=None):
+    args_dict = {}
+
+    args_match_names = {
+        "Dataset name": "filename",
+        "N folds split": "n_folds",
+
+        "Solver: ": "solver_type",
+        "Solver name": "solver_name",
+        "Loss": "loss",
+        "Aggregation": "aggregation",
+        "Filter": "filter",
+        "Top filter": "top_filter",
+
+        "Top K": "top_k",
+        "Number of reads": "num_reads",
+        "Constraint": "constr_mlt",
+        "Alpha": "alpha_mlt",
+        "Chain": "chain_mlt",
+        "Unpopular threshold": "unpop_thresh",
+
+        "Cutoff": "cutoff",
+    }
+
+    if keep_pars is not None:
+        args_match_names = {key: elem for key, elem in args_match_names.items() if elem in keep_pars}
+
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            line = line.rstrip()
+            for string, parameter in args_match_names.items():
+                if line.find(string) != -1:
+                    args_dict[parameter] = line.split(": ")[-1]
+    return args_dict
+
+
 def save_result(model, exp_result, args):
     # Set up writing folder and file
-    fd, folder_path_with_date = handle_folder_creation(result_path=args.output_folder)
+    fd, folder_path_with_date = handle_folder_creation(result_path=args.output_folder,
+                                                       filename="results.txt" if exp_result != {} else "results_fail.txt")
 
     # Save model
-    model.save_model(folder_path=folder_path_with_date)
+    if exp_result != {}:
+        model.save_model(folder_path=folder_path_with_date)
+
     if args.foldername is None:
         model.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
     else:
         cache_results_filepath = os.path.join(args.output_folder, args.foldername, "results.txt")
-        with open(cache_results_filepath, 'r') as f:
-            lines = f.readlines()
-            for line in lines:
-                line = line.rstrip()
-                if line.find("Solver: ") != -1:
-                    args.solver_type = line.split(": ")[-1]
-                elif line.find("Solver name") != -1:
-                    args.solver_name = line.split(": ")[-1]
-                elif line.find("Loss") != -1:
-                    args.loss = line.split(": ")[-1]
-                elif line.find("Top K") != -1:
-                    args.top_k = line.split(": ")[-1]
-                elif line.find("Number of reads") != -1:
-                    args.num_reads = line.split(": ")[-1]
-                elif line.find("Constraint") != -1:
-                    args.constr_mlt = line.split(": ")[-1]
-                elif line.find("Chain") != -1:
-                    args.chain_mlt = line.split(": ")[-1]
-                elif line.find("Remove unpopular items") != -1:
-                    args.rm_unpop = line.split(": ")[-1]
-                elif line.find("Unpopular threshold") != -1:
-                    args.unpop_thresh = line.split(": ")[-1]
+        parameters_to_overwrite = ["solver_type", "solver_name", "loss", "top_k", "num_reads", "constr_mlt",
+                                   "chain_mlt", "alpha_mlt", "unpop_thresh"]
+        args_dict = parse_results_file(cache_results_filepath, parameters_to_overwrite)
+
+        # Remove keys to overwrite from original arguments
+        init_args_dict = vars(args)
+        for parameter in parameters_to_overwrite:
+            init_args_dict.pop(parameter)
+
+        args = argparse.Namespace(**{**args_dict, **init_args_dict})
 
     fd.write("--- Quantum SLIM Experiment ---\n")
     fd.write("\n")
 
     fd.write("DATASET INFO\n")
     fd.write("Dataset name: {}\n".format(args.filename))
+    fd.write("N folds split: {}\n".format(args.n_folds))
     fd.write("\n")
 
     fd.write("CONSTRUCTOR PARAMETERS\n")
@@ -299,6 +330,9 @@ def save_result(model, exp_result, args):
     fd.write(" - Unpopular threshold: {}\n".format(args.unpop_thresh))
     fd.write("\n")
 
+    fd.write("EVALUATION\n")
+    fd.write(" - Cutoff: {}\n".format(args.cutoff))
+
     fd.write("- Results -\n")
     if args.foldername is not None:
         fd.write("The following results comes from the solver_responses.csv of folder {}\n"
@@ -306,6 +340,7 @@ def save_result(model, exp_result, args):
     fd.write(str(exp_result))
 
     fd.close()
+    return folder_path_with_date
 
 
 if __name__ == '__main__':

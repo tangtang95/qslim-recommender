@@ -1,3 +1,5 @@
+import traceback
+
 import dimod
 import numpy as np
 import scipy.sparse as sps
@@ -37,6 +39,17 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         self.transform_fn = transform_fn
         self.filter_strategy = filter_strategy
         self.df_responses = None
+        self.to_resume = False
+
+    def preload_fit(self, df_responses):
+        """
+        Preload the dataframe of df_responses to prepare for the fit function in case you need to resume the fit
+        function failed previously.
+
+        :param df_responses: dataframe with all the samples collected by the crashed fit function
+        """
+        self.df_responses = df_responses
+        self.to_resume = True
 
     def build_similarity_matrix(self, df_responses):
         """
@@ -95,9 +108,14 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         unpopular_items_indices = np.where(item_pop < unpopular_threshold)[0]
 
         var_mapping = {i: "a{:02d}".format(i) for i in range(n_items)}
-        self.df_responses = pd.DataFrame()
 
-        for curr_item in tqdm(range(n_items), desc="{}: Computing W_sparse matrix".format(self.RECOMMENDER_NAME)):
+        if self.to_resume:
+            start_item = self.df_responses["item_id"].max()
+        else:
+            self.df_responses = pd.DataFrame()
+            start_item = 0
+
+        for curr_item in tqdm(range(start_item, n_items), desc="%s: Computing W_sparse matrix" % self.RECOMMENDER_NAME):
             # get the target column
             target_column = URM_train[:, curr_item].toarray()
 
@@ -126,18 +144,22 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             self._print("The BQM for item {} is {}".format(curr_item, bqm))
 
             # solve the problem with the solver
-            if ("child_properties" in self.solver.properties and
-                self.solver.properties["child_properties"]["category"] == "qpu") \
-                    or "qpu_properties" in self.solver.properties:
-                chain_strength = max(self.MIN_CONSTRAINT_STRENGTH,
-                                     chain_multiplier * (np.max(qubo) - np.min(qubo)))
-                response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
-                self._print("Break chain percentage of item {} is {}"
-                            .format(curr_item, list(response.data(fields=["chain_break_fraction"]))))
-            else:
-                response = self.solver.sample(bqm, **solver_parameters)
+            try:
+                if ("child_properties" in self.solver.properties and
+                    self.solver.properties["child_properties"]["category"] == "qpu") \
+                        or "qpu_properties" in self.solver.properties:
+                    chain_strength = max(self.MIN_CONSTRAINT_STRENGTH,
+                                         chain_multiplier * (np.max(qubo) - np.min(qubo)))
+                    response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
+                    self._print("Break chain percentage of item {} is {}"
+                                .format(curr_item, list(response.data(fields=["chain_break_fraction"]))))
+                else:
+                    response = self.solver.sample(bqm, **solver_parameters)
 
-            self._print("The response for item {} is {}".format(curr_item, response.aggregate()))
+                self._print("The response for item {} is {}".format(curr_item, response.aggregate()))
+            except OSError as err:
+                traceback.print_exc()
+                raise err
 
             # save response in self.responses
             response_df = response.to_pandas_dataframe()
