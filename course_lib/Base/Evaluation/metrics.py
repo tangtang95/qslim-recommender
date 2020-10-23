@@ -534,6 +534,88 @@ def _compute_shannon_entropy(recommended_counter):
 
 
 
+class Ratio_Shannon_Entropy(_Global_Item_Distribution_Counter):
+
+    def __init__(self, URM_train, ignore_items):
+
+        n_items = URM_train.shape[1]
+        self.recommended_counter_train = np.ediff1d(sps.csc_matrix(URM_train).indptr)
+        super(Ratio_Shannon_Entropy, self).__init__(n_items, ignore_items)
+
+    def get_metric_value(self):
+
+        recommended_counter = self._get_recommended_items_counter()
+        shannon_entropy_recommendations = _compute_shannon_entropy(recommended_counter)
+        recommended_counter_recommendations = self.recommended_counter.copy()
+
+        self.recommended_counter = self.recommended_counter_train.copy()
+        recommended_counter_train = self._get_recommended_items_counter()
+        shannon_entropy_train = _compute_shannon_entropy(recommended_counter_train)
+
+        self.recommended_counter = recommended_counter_recommendations
+
+        ratio_value = shannon_entropy_recommendations/shannon_entropy_train
+
+        return ratio_value
+
+
+
+class Ratio_Diversity_Herfindahl(_Global_Item_Distribution_Counter):
+
+    def __init__(self, URM_train, ignore_items):
+
+        n_items = URM_train.shape[1]
+        self.recommended_counter_train = np.ediff1d(sps.csc_matrix(URM_train).indptr)
+        super(Ratio_Diversity_Herfindahl, self).__init__(n_items, ignore_items)
+
+    def get_metric_value(self):
+
+        recommended_counter = self._get_recommended_items_counter()
+        diversity_herfindahl_recommendations = _compute_diversity_herfindahl(recommended_counter)
+        recommended_counter_recommendations = self.recommended_counter.copy()
+
+        self.recommended_counter = self.recommended_counter_train.copy()
+        recommended_counter_train = self._get_recommended_items_counter()
+        diversity_herfindahl_train = _compute_diversity_herfindahl(recommended_counter_train)
+
+        self.recommended_counter = recommended_counter_recommendations
+
+        ratio_value = diversity_herfindahl_recommendations/diversity_herfindahl_train
+
+        return ratio_value
+
+
+
+class Ratio_Diversity_Gini(_Global_Item_Distribution_Counter):
+
+    def __init__(self, URM_train, ignore_items):
+
+        n_items = URM_train.shape[1]
+        self.recommended_counter_train = np.ediff1d(sps.csc_matrix(URM_train).indptr)
+        super(Ratio_Diversity_Gini, self).__init__(n_items, ignore_items)
+
+    def get_metric_value(self):
+
+        recommended_counter = self._get_recommended_items_counter()
+        diversity_gini_recommendations = _compute_diversity_gini(recommended_counter)
+        recommended_counter_recommendations = self.recommended_counter.copy()
+
+        self.recommended_counter = self.recommended_counter_train.copy()
+        recommended_counter_train = self._get_recommended_items_counter()
+        diversity_gini_train = _compute_diversity_gini(recommended_counter_train)
+
+        self.recommended_counter = recommended_counter_recommendations
+
+        ratio_value = diversity_gini_recommendations/diversity_gini_train
+
+        return ratio_value
+
+
+
+import scipy.sparse as sps
+
+
+
 class Novelty(_Metrics_Object):
     """
     Novelty measures how "novel" a recommendation is in terms of how popular the item was in the train set.
@@ -589,6 +671,46 @@ class Novelty(_Metrics_Object):
 
 
 
+
+class Ratio_Novelty(_Metrics_Object):
+
+    def __init__(self, URM_train):
+        super(Ratio_Novelty, self).__init__()
+
+        self.novelty_object_recommendations = Novelty(URM_train)
+
+        URM_train = sps.csr_matrix(URM_train)
+        novelty_object_train = Novelty(URM_train)
+
+        for user_id in range(URM_train.shape[0]):
+            start_pos = URM_train.indptr[user_id]
+            end_pos = URM_train.indptr[user_id+1]
+
+            novelty_object_train.add_recommendations(URM_train.indices[start_pos:end_pos])
+
+        self.novelty_train = novelty_object_train.get_metric_value()
+
+
+    def add_recommendations(self, recommended_items_ids):
+        self.novelty_object_recommendations.add_recommendations(recommended_items_ids)
+
+
+    def get_metric_value(self):
+
+        novelty_recommendations = self.novelty_object_recommendations.get_metric_value()
+
+        ratio_value = novelty_recommendations/self.novelty_train
+
+        return ratio_value
+
+
+    def merge_with_other(self, other_metric_object):
+        assert other_metric_object is Ratio_Novelty, "Ratio_Novelty: attempting to merge with a metric object of different type"
+
+        self.novelty_object_recommendations.merge_with_other(other_metric_object.novelty_object_recommendations)
+
+
+
 class AveragePopularity(_Metrics_Object):
     """
     Average popularity the recommended items have in the train data.
@@ -634,6 +756,46 @@ class AveragePopularity(_Metrics_Object):
         self.cumulative_popularity = self.cumulative_popularity + other_metric_object.cumulative_popularity
         self.n_evaluated_users = self.n_evaluated_users + other_metric_object.n_evaluated_users
 
+
+
+
+
+class Ratio_AveragePopularity(_Metrics_Object):
+
+    def __init__(self, URM_train):
+        super(Ratio_AveragePopularity, self).__init__()
+
+        self.average_popularity_recommendations = AveragePopularity(URM_train)
+
+        URM_train = sps.csr_matrix(URM_train)
+        average_popularity_object_train = AveragePopularity(URM_train)
+
+        for user_id in range(URM_train.shape[0]):
+            start_pos = URM_train.indptr[user_id]
+            end_pos = URM_train.indptr[user_id+1]
+
+            average_popularity_object_train.add_recommendations(URM_train.indices[start_pos:end_pos])
+
+        self.average_popularity_train = average_popularity_object_train.get_metric_value()
+
+
+    def add_recommendations(self, recommended_items_ids):
+        self.average_popularity_recommendations.add_recommendations(recommended_items_ids)
+
+
+    def get_metric_value(self):
+
+        average_popularity_recommendations = self.average_popularity_recommendations.get_metric_value()
+
+        ratio_value = average_popularity_recommendations/self.average_popularity_train
+
+        return ratio_value
+
+
+    def merge_with_other(self, other_metric_object):
+        assert other_metric_object is Ratio_AveragePopularity, "Ratio_AveragePopularity: attempting to merge with a metric object of different type"
+
+        self.average_popularity_recommendations.merge_with_other(other_metric_object.novelty_object_recommendations)
 
 
 

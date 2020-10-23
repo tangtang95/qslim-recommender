@@ -14,7 +14,8 @@ from enum import Enum
 from course_lib.Utils.seconds_to_biggest_unit import seconds_to_biggest_unit
 
 from course_lib.Base.Evaluation.metrics import roc_auc, precision, precision_recall_min_denominator, recall, MAP, MRR, ndcg, arhr, RMSE, \
-    Novelty, Coverage_Item, _Metrics_Object, Coverage_User, Gini_Diversity, Shannon_Entropy, Diversity_MeanInterList, Diversity_Herfindahl, AveragePopularity
+    Novelty, Coverage_Item, Coverage_Test_Correct, _Metrics_Object, Coverage_User, Coverage_User_Correct, Gini_Diversity, Shannon_Entropy, Diversity_MeanInterList,\
+    Diversity_Herfindahl, AveragePopularity
 
 
 class EvaluatorMetrics(Enum):
@@ -36,7 +37,9 @@ class EvaluatorMetrics(Enum):
     DIVERSITY_MEAN_INTER_LIST = "DIVERSITY_MEAN_INTER_LIST"
     DIVERSITY_HERFINDAHL = "DIVERSITY_HERFINDAHL"
     COVERAGE_ITEM = "COVERAGE_ITEM"
+    COVERAGE_ITEM_CORRECT = "COVERAGE_ITEM_CORRECT"
     COVERAGE_USER = "COVERAGE_USER"
+    COVERAGE_USER_CORRECT = "COVERAGE_USER_CORRECT"
     DIVERSITY_GINI = "DIVERSITY_GINI"
     SHANNON_ENTROPY = "SHANNON_ENTROPY"
 
@@ -57,6 +60,9 @@ def _create_empty_metrics_dict(cutoff_list, n_items, n_users, URM_train, URM_tes
             if metric == EvaluatorMetrics.COVERAGE_ITEM:
                 cutoff_dict[metric.value] = Coverage_Item(n_items, ignore_items)
 
+            elif metric == EvaluatorMetrics.COVERAGE_ITEM_CORRECT:
+                cutoff_dict[metric.value] = Coverage_Test_Correct(n_items, ignore_items)
+
             elif metric == EvaluatorMetrics.DIVERSITY_GINI:
                 cutoff_dict[metric.value] = Gini_Diversity(n_items, ignore_items)
 
@@ -65,6 +71,9 @@ def _create_empty_metrics_dict(cutoff_list, n_items, n_users, URM_train, URM_tes
 
             elif metric == EvaluatorMetrics.COVERAGE_USER:
                 cutoff_dict[metric.value] = Coverage_User(n_users, ignore_users)
+
+            elif metric == EvaluatorMetrics.COVERAGE_USER_CORRECT:
+                cutoff_dict[metric.value] = Coverage_User_Correct(n_users, ignore_users)
 
             elif metric == EvaluatorMetrics.DIVERSITY_MEAN_INTER_LIST:
                 cutoff_dict[metric.value] = Diversity_MeanInterList(n_items, cutoff)
@@ -346,7 +355,9 @@ class Evaluator(object):
                 results_current_cutoff[EvaluatorMetrics.DIVERSITY_GINI.value].add_recommendations(recommended_items_current_cutoff)
                 results_current_cutoff[EvaluatorMetrics.SHANNON_ENTROPY.value].add_recommendations(recommended_items_current_cutoff)
                 results_current_cutoff[EvaluatorMetrics.COVERAGE_ITEM.value].add_recommendations(recommended_items_current_cutoff)
+                results_current_cutoff[EvaluatorMetrics.COVERAGE_ITEM_CORRECT.value].add_recommendations(recommended_items_current_cutoff, is_relevant_current_cutoff)
                 results_current_cutoff[EvaluatorMetrics.COVERAGE_USER.value].add_recommendations(recommended_items_current_cutoff, test_user)
+                results_current_cutoff[EvaluatorMetrics.COVERAGE_USER_CORRECT.value].add_recommendations(is_relevant_current_cutoff, test_user)
                 results_current_cutoff[EvaluatorMetrics.DIVERSITY_MEAN_INTER_LIST.value].add_recommendations(recommended_items_current_cutoff)
                 results_current_cutoff[EvaluatorMetrics.DIVERSITY_HERFINDAHL.value].add_recommendations(recommended_items_current_cutoff)
 
