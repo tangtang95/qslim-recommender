@@ -103,6 +103,12 @@ def set_size(width, fraction=1, subplots=(1, 1)):
     return fig_width_in, fig_height_in
 
 
+def save_low_and_high_resolution_images(filename):
+    import matplotlib.pyplot as plt
+    plt.savefig(filename + ".pdf", format="pdf", bbox_inches="tight", dpi=300)
+    plt.savefig(filename + ".png", format="png", bbox_inches="tight", dpi=75)
+
+
 def get_project_root_path():
     import os
     return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

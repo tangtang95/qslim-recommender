@@ -1,5 +1,5 @@
 import traceback
-
+import time
 import dimod
 import numpy as np
 import pandas as pd
@@ -17,27 +17,41 @@ from src.models.QuantumSLIM.Losses.LossInterface import LossInterface
 from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
 
 
-class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
+class QSLIM_Timing(BaseItemSimilarityMatrixRecommender):
     """
     It trains a Sparse LInear Methods (SLIM) item similarity model by using a Quantum DWave Machine. The objective
     function are MSE losses and some variants with some other regulators.
     """
 
-    RECOMMENDER_NAME = "QuantumSLIM_MSE"
+    RECOMMENDER_NAME = "QSLIM_Timing"
 
     MIN_CONSTRAINT_STRENGTH = 10
-    ITEM_ID_COLUMN_NAME = "item_id"
 
     def __init__(self, URM_train, solver: dimod.Sampler, agg_strategy: AggregatorInterface = AggregatorFirst(),
                  transform_fn: LossInterface = MSELoss(only_positive=False),
                  filter_strategy: FilterStrategy = NoFilter(), verbose=True):
-        super(QuantumSLIM_MSE, self).__init__(URM_train, verbose=verbose)
+        super(QSLIM_Timing, self).__init__(URM_train, verbose=verbose)
         self.solver = solver
         self.agg_strategy = agg_strategy
         self.transform_fn = transform_fn
         self.filter_strategy = filter_strategy
         self.df_responses = None
         self.to_resume = False
+
+        # TIMING VARIABLES
+        self.fit_time = {
+            'preprocessing_time': 0,
+            'sampling_time': 0,
+            'response_save_time': 0,
+            'postprocessing_time': 0
+        }
+        self.qpu_time = {
+            'qpu_sampling_time': 0,
+            'qpu_anneal_time_per_sample': 0,
+            'qpu_readout_time_per_sample': 0,
+            'qpu_programming_time': 0,
+            'qpu_delay_time_per_sample': 0
+        }
 
     def preload_fit(self, df_responses):
         """
@@ -65,15 +79,18 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         matrix_builder = IncrementalSparseMatrix(n_rows=n_items, n_cols=n_items)
 
         for currentItem in range(n_items):
+            # START COLLECT POSTPROCESSING TIME
+            _postprocessing_time_start = time.time()
+
             response_df = df_responses[df_responses.item_id == currentItem].copy()
             filtered_response_df = self.filter_strategy.filter_samples(response_df)
             solution_list = self.agg_strategy.get_aggregated_response(filtered_response_df)
-
-            self._print("The aggregated response for item {} is {}".format(currentItem,
-                                                                           solution_list))
-
             row_indices = np.where(solution_list > 0)[0]
             matrix_builder.add_data_lists(row_indices, [currentItem] * len(row_indices), solution_list[row_indices])
+
+            self.fit_time['postprocessing_time'] += time.time() - _postprocessing_time_start
+            # END COLLECTING POSTPROCESSING TIME
+
         return sps.csr_matrix(matrix_builder.get_SparseMatrix())
 
     def fit(self, topK=5, alpha_multiplier=0, constraint_multiplier=1, chain_multiplier=1, unpopular_threshold=0,
@@ -100,47 +117,33 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         """
         URM_train = check_matrix(self.URM_train, 'csc', dtype=np.float32)
         n_items = URM_train.shape[1]
-
-        # Choose unpopular items
         item_pop = np.array((URM_train > 0).sum(axis=0)).flatten()
         unpopular_items_indices = np.where(item_pop < unpopular_threshold)[0]
-
-        # Need a labeling of variables to order the variables from 0 to n_items. With variable leading zeros based on
-        # the highest number of digits
-        leading_zeros = len(str(n_items - 1))
-        variables = ["a{:0{}d}".format(i, leading_zeros) for i in range(n_items)]
-
+        variables = ["a{:04d}".format(i) for i in range(n_items)]
         if self.to_resume:
-            start_item = self.df_responses[self.ITEM_ID_COLUMN_NAME].max()
+            start_item = self.df_responses["item_id"].max()
         else:
             self.df_responses = pd.DataFrame()
             start_item = 0
 
         for curr_item in tqdm(range(start_item, n_items), desc="%s: Computing W_sparse matrix" % self.RECOMMENDER_NAME):
-            # get the target column
+            # START COLLECTING PREPROCESSSING TIME
+            _preprocessing_time_start = time.time()
             target_column = URM_train[:, curr_item].toarray()
-
-            # set the "curr_item"-th column of URM_train to zero
             start_pos = URM_train.indptr[curr_item]
             end_pos = URM_train.indptr[curr_item + 1]
             current_item_data_backup = URM_train.data[start_pos: end_pos].copy()
             URM_train.data[start_pos: end_pos] = 0.0
-
-            # get BQM/QUBO problem for the current item
             qubo = self.transform_fn.get_qubo_problem(URM_train, target_column)
             qubo = np.round(qubo * qubo_round_percentage)
-            qubo = qubo + (np.log1p(item_pop[curr_item])**2 + 1) * alpha_multiplier * (np.max(qubo) - np.min(qubo)) \
+            qubo = qubo + (np.log1p(item_pop[curr_item]) ** 2 + 1) * alpha_multiplier * (np.max(qubo) - np.min(qubo)) \
                    * np.identity(n_items)
             if topK > -1:
                 constraint_strength = max(self.MIN_CONSTRAINT_STRENGTH,
-                                          constraint_multiplier * (np.max(qubo) - np.min(qubo)))
-                # avoid using the "combinations" function of dimod in order to speed up the computation
+                                      constraint_multiplier * (np.max(qubo) - np.min(qubo)))
                 qubo += -2 * constraint_strength * topK * np.identity(n_items) + constraint_strength * np.ones(
                     (n_items, n_items))
 
-            # Generation of the BQM with qubo in a quicker way checked with some performance measuring. On a test of
-            # 2000 n_items, this method has a boost from 22 seconds to 12 seconds for a single item w.r.t.
-            # from_numpy_matrix function
             bqm = dimod.BinaryQuadraticModel.empty(dimod.BINARY)
             bqm.add_variables_from(dict(zip(variables, np.diag(qubo))))
 
@@ -148,13 +151,12 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                 values = np.array(qubo[i, i + 1:]).flatten() + np.array(qubo[i + 1:, i]).flatten()
                 keys = [(variables[i], variables[j]) for j in range(i + 1, n_items)]
                 bqm.add_interactions_from(dict(zip(keys, values)))
+            bqm.fix_variables({"a{:04d}".format(i): 0 for i in unpopular_items_indices})
+            self.fit_time['preprocessing_time'] += (time.time() - _preprocessing_time_start)
+            # END COLLECTING PREPROCESSING TIME
 
-            # remove unpopular items from the optimization problem
-            bqm.fix_variables({variables[i] for i in unpopular_items_indices})
-
-            self._print("The BQM for item {} is {}".format(curr_item, bqm))
-
-            # solve the problem with the solver
+            # START COLLECTING SAMPLING TIME
+            _sampling_time_start = time.time()
             try:
                 if ("child_properties" in self.solver.properties and
                     self.solver.properties["child_properties"]["category"] == "qpu") \
@@ -162,27 +164,33 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                     chain_strength = max(self.MIN_CONSTRAINT_STRENGTH,
                                          chain_multiplier * (np.max(qubo) - np.min(qubo)))
                     response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
-                    self._print("Break chain percentage of item {} is {}"
-                                .format(curr_item, list(response.data(fields=["chain_break_fraction"]))))
+
                     self._print("Timing of QPU is %s" % response.info["timing"])
+                    timing = response.info["timing"]
+                    for key in self.qpu_time.keys():
+                        self.qpu_time[key] = self.qpu_time[key] + timing[key]
                 else:
                     response = self.solver.sample(bqm, **solver_parameters)
-
-                self._print("The response for item {} is {}".format(curr_item, response.aggregate()))
             except OSError as err:
                 traceback.print_exc()
                 raise err
 
-            # save response in self.responses
-            response_df = response.to_pandas_dataframe()
-            response_df[variables[curr_item]] = 0.0
-            for i in unpopular_items_indices:
-                response_df[variables[i]] = 0.0
-            response_df[self.ITEM_ID_COLUMN_NAME] = curr_item
-            self.df_responses = self.df_responses.append(response_df, ignore_index=True)
+            self.fit_time['sampling_time'] += time.time() - _sampling_time_start
+            # END COLLECTING SAMPLING TIME
 
-            # restore URM_train
+            # START COLLECTING RESPONSE SAVE TIME
+            _response_save_time_start = time.time()
+
+            response_df = response.to_pandas_dataframe()
+            response_df["a{:04d}".format(curr_item)] = 0.0
+            for i in unpopular_items_indices:
+                response_df["a{:04d}".format(i)] = 0.0
+            response_df["item_id"] = curr_item
+            self.df_responses = self.df_responses.append(response_df, ignore_index=True)
             URM_train.data[start_pos:end_pos] = current_item_data_backup
+
+            self.fit_time['response_save_time'] += time.time() - _response_save_time_start
+            # END COLLECTING RESPONSE SAVE TIME
 
         self.df_responses = self.df_responses.reindex(sorted(self.df_responses.columns), axis=1)
         self.W_sparse = self.build_similarity_matrix(self.df_responses)

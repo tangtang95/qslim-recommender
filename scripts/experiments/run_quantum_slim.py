@@ -48,6 +48,7 @@ DEFAULT_ALPHA_MULTIPLIER = 0.0
 DEFAULT_NUM_READS = 50
 DEFAULT_MULTIPLIER = 1.0
 DEFAULT_UNPOPULAR_THRESHOLD = 0
+DEFAULT_QUBO_ROUND_PERCENTAGE = 1.0
 
 # OTHERS
 DEFAULT_CUTOFF = 5
@@ -104,6 +105,8 @@ def get_arguments():
     parser.add_argument("-ut", "--unpop_thresh", help="The threshold of unpopularity for the removal of unpopular "
                                                       "items",
                         type=int, default=DEFAULT_UNPOPULAR_THRESHOLD)
+    parser.add_argument("-qrp", "--round_percent", help="The percentage of rounding to apply on QUBO matrix",
+                        type=float, default=DEFAULT_QUBO_ROUND_PERCENTAGE)
 
     # Evaluation setting
     parser.add_argument("-c", "--cutoff", help="Cutoff value for evaluation", type=int,
@@ -231,7 +234,8 @@ def run_experiment(args, preload_df_responses=None):
             kwargs["num_reads"] = args.num_reads
         try:
             model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
-                      chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh, **kwargs)
+                      chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh,
+                      qubo_round_percentage=args.round_percent, **kwargs)
         except OSError:
             print("EXCEPTION: handling exception by saving the model up to now in order to resume it later")
             return model, {}
@@ -243,7 +247,7 @@ def run_experiment(args, preload_df_responses=None):
     return model, evaluator.evaluateRecommender(model)[0]
 
 
-def parse_results_file(filepath, keep_pars=None):
+def parse_results_file(filepath, keep_parameters=None):
     args_dict = {}
 
     args_match_names = {
@@ -263,12 +267,13 @@ def parse_results_file(filepath, keep_pars=None):
         "Alpha": "alpha_mlt",
         "Chain": "chain_mlt",
         "Unpopular threshold": "unpop_thresh",
+        "QUBO round percentage": "round_percent",
 
         "Cutoff": "cutoff",
     }
 
-    if keep_pars is not None:
-        args_match_names = {key: elem for key, elem in args_match_names.items() if elem in keep_pars}
+    if keep_parameters is not None:
+        args_match_names = {key: elem for key, elem in args_match_names.items() if elem in keep_parameters}
 
     with open(filepath, 'r') as f:
         lines = f.readlines()
@@ -328,6 +333,7 @@ def save_result(model, exp_result, args):
     fd.write(" - Constraint multiplier: {}\n".format(args.constr_mlt))
     fd.write(" - Chain multiplier: {}\n".format(args.chain_mlt))
     fd.write(" - Unpopular threshold: {}\n".format(args.unpop_thresh))
+    fd.write(" - QUBO round percentage: {}\n".format(args.round_percent))
     fd.write("\n")
 
     fd.write("EVALUATION\n")
@@ -350,5 +356,3 @@ if __name__ == '__main__':
 
     if arguments.save_result:
         save_result(mdl, result, arguments)
-
-
