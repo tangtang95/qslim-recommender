@@ -9,7 +9,7 @@ from src.data.NoHeaderCSVReader import NoHeaderCSVReader
 if __name__ == '__main__':
     np.random.seed(52316)
 
-    reader = NoHeaderCSVReader(filename="jester100_t0.csv")
+    reader = NoHeaderCSVReader(filename="ml100k.csv")
     splitter = DataSplitter_Warm_k_fold(reader, n_folds=5)
     splitter.load_data()
 

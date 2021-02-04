@@ -34,7 +34,7 @@ if __name__ == '__main__':
 
         curr_args = argparse.Namespace(**dict_args)
 
-        mdl, result = run_experiment(curr_args)
+        mdl, result = run_experiment(curr_args, do_fit=arguments.foldername is None)
         print("Results: {}".format(str(result)))
 
         if arguments.save_result:

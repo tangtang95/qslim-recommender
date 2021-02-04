@@ -2,31 +2,27 @@ import argparse
 import itertools
 import os
 import time
-import pandas as pd
 
+import pandas as pd
 import scipy.sparse as sps
 
-from scripts.experiments.run_quantum_slim import get_solver, get_loss, get_aggregation_strategy, get_filter_strategy, \
-    get_arguments
+from scripts.experiments.run_quantum_slim import get_solver, get_arguments, save_result
 from src.models.QuantumSLIM.QSLIM_Timing import QSLIM_Timing
-from src.utils.utilities import handle_folder_creation, get_project_root_path
+from src.utils.utilities import get_project_root_path
 
 N_EXPERIMENTS = 5
 
 HYPERPARAMETERS = {
-    "N_USERS": [10000],
-    "N_ITEMS": [750],
+    "N_USERS": [1000],
+    "N_ITEMS": [25, 75],
     "DENSITY": [0.05]
 }
 
 
 def run_time_test(URM_train, args):
     solver = get_solver(args.solver_type, args.solver_name, args.token)
-    loss_fn = get_loss(args.loss)
-    agg_strategy = get_aggregation_strategy(args.aggregation)
-    filter_strategy = get_filter_strategy(args.filter, args.top_filter)
-    model = QSLIM_Timing(URM_train=URM_train, solver=solver, transform_fn=loss_fn, agg_strategy=agg_strategy,
-                         filter_strategy=filter_strategy, verbose=args.verbose)
+    model = QSLIM_Timing(URM_train=URM_train, solver=solver, obj_function=args.loss, agg_strategy=args.aggregation,
+                         filter_sample_method=args.filter_sample_method, verbose=args.verbose)
 
     # START FIT TIME
     _fit_time_start = time.time()
@@ -45,47 +41,10 @@ def run_time_test(URM_train, args):
     return model, fit_time
 
 
-def save_result(n_users, n_items, density, fit_times_dict, qpu_times_dict, total_fit_time_list, args):
-    # Set up writing folder and file
-    results_path = os.path.join(get_project_root_path(), "report", "quantum_slim_timing_tests")
-    fd, folder_path_with_date = handle_folder_creation(result_path=results_path,
-                                                       filename="results.txt")
-
-    fd.write("--- Quantum SLIM Experiment ---\n")
-    fd.write(" - Number of experiments: {}\n".format(N_EXPERIMENTS))
-    fd.write("\n")
-
-    fd.write("DATASET INFO\n")
-    fd.write(" - Dataset name: RANDOMLY DISTRIBUTED SYNTHETIC DATASET\n")
-    fd.write(" - N_USERS: {}\n".format(n_users))
-    fd.write(" - N_ITEMS: {}\n".format(n_items))
-    fd.write(" - DENSITY: {}\n".format(density))
-    fd.write("\n")
-
-    fd.write("CONSTRUCTOR PARAMETERS\n")
-    fd.write(" - Solver: {}\n".format(args.solver_type))
-    fd.write(" - Solver name: {}\n".format(args.solver_name))
-    fd.write(" - Loss function: {}\n".format(args.loss))
-    fd.write(" - Aggregation strategy: {}\n".format(args.aggregation))
-    fd.write(" - Filter strategy: {}\n".format(args.filter))
-    fd.write(" - Top filter value: {}\n".format(args.top_filter))
-    fd.write("\n")
-
-    fd.write("FIT PARAMETERS\n")
-    fd.write(" - Top K: {}\n".format(args.top_k))
-    fd.write(" - Number of reads: {}\n".format(args.num_reads))
-    fd.write(" - Alpha multiplier: {}\n".format(args.alpha_mlt))
-    fd.write(" - Constraint multiplier: {}\n".format(args.constr_mlt))
-    fd.write(" - Chain multiplier: {}\n".format(args.chain_mlt))
-    fd.write(" - Unpopular threshold: {}\n".format(args.unpop_thresh))
-    fd.write(" - QUBO round percentage: {}\n".format(args.round_percent))
-    fd.write("\n")
-
-    fd.write("EVALUATION\n")
-    fd.write(" - Cutoff: {}\n".format(args.cutoff))
-    fd.close()
-
+def save_timing_info(output_folder, n_users, n_items, density, fit_times_dict, qpu_times_dict,
+                     total_fit_time_list, args):
     # write data and timing info on csv file
+
     columns = ['n_users', 'n_items', 'density', 'n_exp', 'solver_type', 'solver_name',
                'loss_func', 'agg_strategy', 'filter_strategy', 'top_filter_value',
                'select_k', 'num_reads', 'alpha_mlt', 'constr_mlt', 'chain_mlt',
@@ -97,21 +56,20 @@ def save_result(n_users, n_items, density, fit_times_dict, qpu_times_dict, total
                ]
     data_info = pd.DataFrame(
         [[n_users, n_items, density, N_EXPERIMENTS, args.solver_type, args.solver_name, args.loss,
-          args.aggregation, args.filter, args.top_filter, args.top_k, args.num_reads, args.alpha_mlt,
+          args.aggregation, args.filter_sample_method, None, args.top_k, args.num_reads, args.alpha_mlt,
           args.constr_mlt, args.chain_mlt, args.unpop_thresh, args.round_percent, args.cutoff,
           total_fit_time_list, fit_times_dict['preprocessing_time'], fit_times_dict['sampling_time'],
           fit_times_dict['response_save_time'], fit_times_dict['postprocessing_time'],
           qpu_times_dict['qpu_sampling_time'], qpu_times_dict['qpu_anneal_time_per_sample'],
           qpu_times_dict['qpu_readout_time_per_sample'], qpu_times_dict['qpu_programming_time'],
           qpu_times_dict['qpu_delay_time_per_sample']]], columns=columns)
-    data_info.to_csv(os.path.join(folder_path_with_date, "experiment_info.csv"), sep=',', header=True, index=False)
-
-    return folder_path_with_date
+    data_info.to_csv(os.path.join(output_folder, "experiment_info.csv"), sep=',', header=True, index=False)
 
 
 if __name__ == '__main__':
     arguments = get_arguments()
     dict_args = vars(arguments).copy()
+    dict_args["output_folder"] = os.path.join(get_project_root_path(), "report", "quantum_slim_timing_tests")
 
     hyperparameters_combinations = list(itertools.product(*HYPERPARAMETERS.values()))
 
@@ -152,4 +110,6 @@ if __name__ == '__main__':
                 qpu_times_dict[key].append(model.qpu_time[key])
             total_fit_time_list.append(fit_time)
 
-        save_result(n_users, n_items, density, fit_times_dict, qpu_times_dict, total_fit_time_list, args=curr_args)
+        output_folder = save_result(None, "None", curr_args)
+        save_timing_info(output_folder, n_users, n_items, density, fit_times_dict, qpu_times_dict, total_fit_time_list,
+                         args=curr_args)

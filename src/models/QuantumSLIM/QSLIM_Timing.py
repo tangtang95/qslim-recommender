@@ -1,5 +1,6 @@
-import traceback
 import time
+import traceback
+
 import dimod
 import numpy as np
 import pandas as pd
@@ -10,11 +11,12 @@ from course_lib.Base.BaseSimilarityMatrixRecommender import BaseItemSimilarityMa
 from course_lib.Base.Recommender_utils import check_matrix
 from course_lib.Data_manager.IncrementalSparseMatrix import IncrementalSparseMatrix
 from src.models.QuantumSLIM.Aggregators.AggregatorFirst import AggregatorFirst
-from src.models.QuantumSLIM.Aggregators.AggregatorInterface import AggregatorInterface
-from src.models.QuantumSLIM.Filters.FilterStrategy import FilterStrategy
+from src.models.QuantumSLIM.Aggregators.AggregatorUnion import AggregatorUnion
 from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
-from src.models.QuantumSLIM.Losses.LossInterface import LossInterface
+from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
 from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
+from src.models.QuantumSLIM.Losses.NormMSELoss import NormMSELoss
+from src.models.QuantumSLIM.Losses.NormMeanErrorLoss import NormMeanErrorLoss
 
 
 class QSLIM_Timing(BaseItemSimilarityMatrixRecommender):
@@ -27,14 +29,44 @@ class QSLIM_Timing(BaseItemSimilarityMatrixRecommender):
 
     MIN_CONSTRAINT_STRENGTH = 10
 
-    def __init__(self, URM_train, solver: dimod.Sampler, agg_strategy: AggregatorInterface = AggregatorFirst(),
-                 transform_fn: LossInterface = MSELoss(only_positive=False),
-                 filter_strategy: FilterStrategy = NoFilter(), verbose=True):
+    AGGREGATORS = {
+        "FIRST": AggregatorFirst(),
+        "LOG": AggregatorUnion(lambda arr: np.log1p(arr), is_filter_first=False, is_weighted=False),
+        "LOG_FIRST": AggregatorUnion(lambda arr: np.log1p(arr), is_filter_first=True, is_weighted=False),
+        "EXP": AggregatorUnion(lambda arr: np.exp(arr), is_filter_first=False, is_weighted=False),
+        "EXP_FIRST": AggregatorUnion(lambda arr: np.exp(arr), is_filter_first=True, is_weighted=False),
+        "AVG": AggregatorUnion(lambda arr: arr, is_filter_first=False, is_weighted=False),
+        "AVG_FIRST": AggregatorUnion(lambda arr: arr, is_filter_first=True, is_weighted=False),
+        "WEIGHTED_AVG": AggregatorUnion(lambda arr: arr, is_filter_first=False, is_weighted=True),
+        "WEIGHTED_AVG_FIRST": AggregatorUnion(lambda arr: arr, is_filter_first=True, is_weighted=True)
+    }
+
+    LOSSES = {
+        "MSE": MSELoss(only_positive=False),
+        "NORM_MSE": NormMSELoss(only_positive=False, is_simplified=False),
+        "NON_ZERO_MSE": MSELoss(only_positive=True),
+        "NON_ZERO_NORM_MSE": NormMSELoss(only_positive=True, is_simplified=False),
+        "SIM_NORM_MSE": NormMSELoss(only_positive=False, is_simplified=True),
+        "SIM_NON_ZERO_NORM_MSE": NormMSELoss(only_positive=True, is_simplified=True),
+        "NORM_MEAN_ERROR": NormMeanErrorLoss(only_positive=False, is_squared=False),
+        "NORM_MEAN_ERROR_SQUARED": NormMeanErrorLoss(only_positive=False, is_squared=True)
+    }
+
+    FILTER_SAMPLES_METHODS = {
+        "NONE": NoFilter(),
+        "TOP_50_PERCENT": TopFilter(0.5),
+        "TOP_20_PERCENT": TopFilter(0.2)
+    }
+
+    def __init__(self, URM_train, solver: dimod.Sampler, agg_strategy: str = "FIRST", obj_function: str = "NORM_MSE",
+                 filter_sample_method: str = "NONE", verbose=True):
         super(QSLIM_Timing, self).__init__(URM_train, verbose=verbose)
+        self._check_init_parameters(agg_strategy, obj_function, filter_sample_method)
+
         self.solver = solver
         self.agg_strategy = agg_strategy
-        self.transform_fn = transform_fn
-        self.filter_strategy = filter_strategy
+        self.obj_function = obj_function
+        self.filter_sample_method = filter_sample_method
         self.df_responses = None
         self.to_resume = False
 
@@ -52,6 +84,30 @@ class QSLIM_Timing(BaseItemSimilarityMatrixRecommender):
             'qpu_programming_time': 0,
             'qpu_delay_time_per_sample': 0
         }
+
+    @classmethod
+    def get_implemented_aggregators(cls):
+        return list(cls.AGGREGATORS.keys())
+
+    @classmethod
+    def get_implemented_losses(cls):
+        return list(cls.LOSSES.keys())
+
+    @classmethod
+    def get_implemented_filter_samples_methods(cls):
+        return list(cls.FILTER_SAMPLES_METHODS.keys())
+
+    def _check_init_parameters(self, aggregation_strategy, obj_function, filter_sample_method):
+        if aggregation_strategy not in self.get_implemented_aggregators():
+            raise NotImplementedError("Filter strategy {} is not implemented".format(aggregation_strategy))
+        if obj_function not in self.get_implemented_losses():
+            raise NotImplementedError("Objective function {} is not implemented".format(obj_function))
+        if filter_sample_method not in self.get_implemented_filter_samples_methods():
+            raise NotImplementedError("Filter sample method {} is not implemented".format(filter_sample_method))
+
+    def _check_fit_parameters(self, filter_item_method):
+        if filter_item_method not in self.get_implemented_filter_samples_methods():
+            raise NotImplementedError("Filter item method {} is not implemented".format(filter_item_method))
 
     def preload_fit(self, df_responses):
         """
@@ -83,8 +139,8 @@ class QSLIM_Timing(BaseItemSimilarityMatrixRecommender):
             _postprocessing_time_start = time.time()
 
             response_df = df_responses[df_responses.item_id == currentItem].copy()
-            filtered_response_df = self.filter_strategy.filter_samples(response_df)
-            solution_list = self.agg_strategy.get_aggregated_response(filtered_response_df)
+            filtered_response_df = self.FILTER_SAMPLES_METHODS[self.filter_sample_method].filter_samples(response_df)
+            solution_list = self.AGGREGATORS[self.agg_strategy].get_aggregated_response(filtered_response_df)
             row_indices = np.where(solution_list > 0)[0]
             matrix_builder.add_data_lists(row_indices, [currentItem] * len(row_indices), solution_list[row_indices])
 
@@ -134,7 +190,7 @@ class QSLIM_Timing(BaseItemSimilarityMatrixRecommender):
             end_pos = URM_train.indptr[curr_item + 1]
             current_item_data_backup = URM_train.data[start_pos: end_pos].copy()
             URM_train.data[start_pos: end_pos] = 0.0
-            qubo = self.transform_fn.get_qubo_problem(URM_train, target_column)
+            qubo = self.LOSSES[self.obj_function].get_qubo_problem(URM_train, target_column)
             qubo = np.round(qubo * qubo_round_percentage)
             qubo = qubo + (np.log1p(item_pop[curr_item]) ** 2 + 1) * alpha_multiplier * (np.max(qubo) - np.min(qubo)) \
                    * np.identity(n_items)

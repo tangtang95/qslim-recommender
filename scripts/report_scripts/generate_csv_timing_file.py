@@ -14,7 +14,7 @@ if __name__ == '__main__':
         for file in files:
             if file.endswith(".csv"):
                 report_files.append(os.path.join(root, file))
-    report_files = sorted(report_files)
+    report_files = sorted(report_files, key=lambda x: os.path.getmtime(x))
     print(report_files)
 
     df = pd.DataFrame()

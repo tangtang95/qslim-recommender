@@ -11,13 +11,6 @@ from dwave.system.samplers import DWaveSampler, DWaveCliqueSampler, LeapHybridSa
 from course_lib.Base.Evaluation.Evaluator import EvaluatorHoldout
 from course_lib.Data_manager.DataSplitter_k_fold import DataSplitter_Warm_k_fold
 from src.data.NoHeaderCSVReader import NoHeaderCSVReader
-from src.models.QuantumSLIM.Aggregators.AggregatorFirst import AggregatorFirst
-from src.models.QuantumSLIM.Aggregators.AggregatorUnion import AggregatorUnion
-from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
-from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
-from src.models.QuantumSLIM.Losses.MSELoss import MSELoss
-from src.models.QuantumSLIM.Losses.NormMSELoss import NormMSELoss
-from src.models.QuantumSLIM.Losses.NormMeanErrorLoss import NormMeanErrorLoss
 from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
 from src.utils.utilities import handle_folder_creation, get_project_root_path, str2bool
 
@@ -25,11 +18,10 @@ SOLVER_TYPE_LIST = ["QPU", "SA", "HYBRID", "FIXED_QPU", "CLIQUE_FIXED_QPU"]
 SOLVER_NAME_LIST = ["DW_2000Q", "ADVANTAGE", "HYBRID_V1", "HYBRID_V2"]
 QPU_SOLVER_NAME_LIST = SOLVER_NAME_LIST[:2]
 HYBRID_SOLVER_NAME_LIST = SOLVER_NAME_LIST[2:4]
-LOSS_NAMES = ["MSE", "NORM_MSE", "NON_ZERO_MSE", "NON_ZERO_NORM_MSE", "SIM_NORM_MSE", "SIM_NON_ZERO_NORM_MSE",
-              "NORM_MEAN_ERROR", "NORM_MEAN_ERROR_SQUARED"]
-AGGREGATION_NAMES = ["FIRST", "LOG", "LOG_FIRST", "EXP", "EXP_FIRST", "AVG", "AVG_FIRST", "WEIGHTED_AVG",
-                     "WEIGHTED_AVG_FIRST"]
-FILTER_NAMES = ["NONE", "TOP"]
+LOSS_NAMES = QuantumSLIM_MSE.get_implemented_losses()
+AGGREGATION_NAMES = QuantumSLIM_MSE.get_implemented_aggregators()
+FILTER_SAMPLE_METHOD_NAMES = QuantumSLIM_MSE.get_implemented_filter_samples_methods()
+FILTER_ITEM_METHOD_NAMES = QuantumSLIM_MSE.get_implemented_filter_item_methods()
 
 # DATASET DEFAULT VALUES
 DEFAULT_N_FOLDS = 5
@@ -39,8 +31,7 @@ DEFAULT_SOLVER_TYPE = "SA"
 DEFAULT_SOLVER_NAME = "NONE"
 DEFAULT_LOSS = "NORM_MSE"
 DEFAULT_AGGREGATION = "FIRST"
-DEFAULT_FILTER = "NONE"
-DEFAULT_FILTER_TOP_VALUE = 0.2
+DEFAULT_FILTER_SAMPLE_METHOD = "NONE"
 
 # FIT DEFAULT VALUES
 DEFAULT_TOP_K = 5
@@ -49,11 +40,14 @@ DEFAULT_NUM_READS = 50
 DEFAULT_MULTIPLIER = 1.0
 DEFAULT_UNPOPULAR_THRESHOLD = 0
 DEFAULT_QUBO_ROUND_PERCENTAGE = 1.0
+DEFAULT_FILTER_ITEM_METHOD = "NONE"
+DEFAULT_FILTER_ITEM_NUMBERS = 100
 
 # OTHERS
 DEFAULT_CUTOFF = 5
 DEFAULT_OUTPUT_FOLDER = os.path.join(get_project_root_path(), "report", "quantum_slim")
 DEFAULT_RESPONSES_CSV_FILENAME = "solver_responses.csv"
+DEFAULT_MAPPING_MATRIX_FILENAME = "mapping_matrix.npy"
 
 
 def get_arguments():
@@ -84,11 +78,9 @@ def get_arguments():
                         type=str, default=DEFAULT_LOSS)
     parser.add_argument("-g", "--aggregation", help="Type of aggregation to use on the response of Quantum SLIM solver",
                         choices=AGGREGATION_NAMES, type=str, default=DEFAULT_AGGREGATION)
-    parser.add_argument("-fi", "--filter", help="Type of filtering to use on the response of Quantum SLIM solver",
-                        choices=FILTER_NAMES, type=str, default=DEFAULT_FILTER)
-    parser.add_argument("-tfi", "--top_filter", help="Percentage of top filtering to use on the response "
-                                                     "of Quantum SLIM solver",
-                        type=float, default=DEFAULT_FILTER_TOP_VALUE)
+    parser.add_argument("-fsm", "--filter_sample_method",
+                        help="Type of filtering to use on the response of Quantum SLIM solver",
+                        choices=FILTER_SAMPLE_METHOD_NAMES, type=str, default=DEFAULT_FILTER_SAMPLE_METHOD)
 
     # Quantum SLIM Fit setting
     parser.add_argument("-k", "--top_k", help="Number of similar item selected for each item", type=int,
@@ -102,6 +94,12 @@ def get_arguments():
                         type=float, default=DEFAULT_MULTIPLIER)
     parser.add_argument("-chm", "--chain_mlt", help="Chain multiplier of the auto-embedding component",
                         type=float, default=DEFAULT_MULTIPLIER)
+    parser.add_argument("-fim", "--filter_item_method",
+                        help="Type of filtering to select items to be used in the optimization problem",
+                        choices=FILTER_ITEM_METHOD_NAMES, type=str, default=DEFAULT_FILTER_ITEM_METHOD)
+    parser.add_argument("-fin", "--filter_item_numbers",
+                        help="Number of items to be filtered by the Filter Item Method",
+                        type=int, default=DEFAULT_FILTER_ITEM_NUMBERS)
     parser.add_argument("-ut", "--unpop_thresh", help="The threshold of unpopularity for the removal of unpopular "
                                                       "items",
                         type=int, default=DEFAULT_UNPOPULAR_THRESHOLD)
@@ -150,67 +148,7 @@ def get_solver(solver_type: str, solver_name: str, token):
     return solver
 
 
-def get_loss(loss_name):
-    if loss_name == "MSE":
-        loss_fn = MSELoss(only_positive=False)
-    elif loss_name == "NORM_MSE":
-        loss_fn = NormMSELoss(only_positive=False, is_simplified=False)
-    elif loss_name == "NON_ZERO_MSE":
-        loss_fn = MSELoss(only_positive=True)
-    elif loss_name == "NON_ZERO_NORM_MSE":
-        loss_fn = NormMSELoss(only_positive=True, is_simplified=False)
-    elif loss_name == "SIM_NORM_MSE":
-        loss_fn = NormMSELoss(only_positive=False, is_simplified=True)
-    elif loss_name == "SIM_NON_ZERO_NORM_MSE":
-        loss_fn = NormMSELoss(only_positive=True, is_simplified=True)
-    elif loss_name == "NORM_MEAN_ERROR":
-        loss_fn = NormMeanErrorLoss(only_positive=False, is_squared=False)
-    elif loss_name == "NORM_MEAN_ERROR_SQUARED":
-        loss_fn = NormMeanErrorLoss(only_positive=False, is_squared=True)
-    else:
-        raise NotImplementedError("Loss function {} is not implemented".format(loss_name))
-    return loss_fn
-
-
-def get_aggregation_strategy(aggregation_name):
-    log_operation_fn = lambda arr: np.log1p(arr)
-    no_operation_fn = lambda arr: arr
-    exp_operation_fn = lambda arr: np.exp(arr)
-
-    if aggregation_name == "FIRST":
-        agg_strategy = AggregatorFirst()
-    elif aggregation_name == "LOG":
-        agg_strategy = AggregatorUnion(log_operation_fn, is_filter_first=False, is_weighted=False)
-    elif aggregation_name == "LOG_FIRST":
-        agg_strategy = AggregatorUnion(log_operation_fn, is_filter_first=True, is_weighted=False)
-    elif aggregation_name == "EXP":
-        agg_strategy = AggregatorUnion(exp_operation_fn, is_filter_first=False, is_weighted=False)
-    elif aggregation_name == "EXP_FIRST":
-        agg_strategy = AggregatorUnion(exp_operation_fn, is_filter_first=True, is_weighted=False)
-    elif aggregation_name == "AVG":
-        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=False, is_weighted=False)
-    elif aggregation_name == "AVG_FIRST":
-        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=True, is_weighted=False)
-    elif aggregation_name == "WEIGHTED_AVG":
-        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=False, is_weighted=True)
-    elif aggregation_name == "WEIGHTED_AVG_FIRST":
-        agg_strategy = AggregatorUnion(no_operation_fn, is_filter_first=True, is_weighted=True)
-    else:
-        raise NotImplementedError("Aggregation strategy {} is not implemented".format(aggregation_name))
-    return agg_strategy
-
-
-def get_filter_strategy(filter_name, top_filter_value):
-    if filter_name == "NONE":
-        filter_strategy = NoFilter()
-    elif filter_name == "TOP":
-        filter_strategy = TopFilter(top_p=top_filter_value)
-    else:
-        raise NotImplementedError("Filter strategy {} is not implemented".format(filter_name))
-    return filter_strategy
-
-
-def run_experiment(args, preload_df_responses=None):
+def run_experiment(args, do_preload=False, do_fit=True):
     np.random.seed(52316)
 
     reader = NoHeaderCSVReader(filename=args.filename)
@@ -220,15 +158,14 @@ def run_experiment(args, preload_df_responses=None):
     URM_train, URM_val, URM_test = splitter.get_holdout_split()
 
     solver = get_solver(args.solver_type, args.solver_name, args.token)
-    loss_fn = get_loss(args.loss)
-    agg_strategy = get_aggregation_strategy(args.aggregation)
-    filter_strategy = get_filter_strategy(args.filter, args.top_filter)
-    model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, transform_fn=loss_fn, agg_strategy=agg_strategy,
-                            filter_strategy=filter_strategy, verbose=args.verbose)
-    if preload_df_responses is not None:
-        model.preload_fit(preload_df_responses)
+    model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, obj_function=args.loss, agg_strategy=args.aggregation,
+                            filter_sample_method=args.filter_sample_method, verbose=args.verbose)
+    if do_preload:
+        responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
+        mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
+        model.preload_fit(responses_df, mapping_matrix)
 
-    if args.foldername is None:
+    if do_fit:
         kwargs = {}
         if args.num_reads > 0:
             kwargs["num_reads"] = args.num_reads
@@ -241,7 +178,8 @@ def run_experiment(args, preload_df_responses=None):
             return model, {}
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
-        model.W_sparse = model.build_similarity_matrix(df_responses=responses_df)
+        mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
+        model.W_sparse = model.build_similarity_matrix(df_responses=responses_df, mapping_matrix=mapping_matrix)
 
     evaluator = EvaluatorHoldout(URM_val, cutoff_list=[args.cutoff])
     return model, evaluator.evaluateRecommender(model)[0]
@@ -291,12 +229,13 @@ def save_result(model, exp_result, args):
                                                        filename="results.txt" if exp_result != {} else "results_fail.txt")
 
     # Save model
-    if exp_result != {}:
+    if model is not None:
         model.save_model(folder_path=folder_path_with_date)
 
-    if args.foldername is None:
+    if args.foldername is None and model is not None:
         model.df_responses.to_csv(os.path.join(folder_path_with_date, DEFAULT_RESPONSES_CSV_FILENAME), index=False)
-    else:
+        np.save(os.path.join(folder_path_with_date, DEFAULT_MAPPING_MATRIX_FILENAME), np.array(model.mapping_matrix))
+    elif args.foldername is not None:
         cache_results_filepath = os.path.join(args.output_folder, args.foldername, "results.txt")
         parameters_to_overwrite = ["solver_type", "solver_name", "loss", "top_k", "num_reads", "constr_mlt",
                                    "chain_mlt", "alpha_mlt", "unpop_thresh"]
@@ -322,8 +261,8 @@ def save_result(model, exp_result, args):
     fd.write(" - Solver name: {}\n".format(args.solver_name))
     fd.write(" - Loss function: {}\n".format(args.loss))
     fd.write(" - Aggregation strategy: {}\n".format(args.aggregation))
-    fd.write(" - Filter strategy: {}\n".format(args.filter))
-    fd.write(" - Top filter value: {}\n".format(args.top_filter))
+    fd.write(" - Filter strategy: {}\n".format(args.filter_sample_method))
+    fd.write(" - Top filter value: {}\n".format(None))
     fd.write("\n")
 
     fd.write("FIT PARAMETERS\n")
@@ -351,7 +290,7 @@ def save_result(model, exp_result, args):
 
 if __name__ == '__main__':
     arguments = get_arguments()
-    mdl, result = run_experiment(arguments)
+    mdl, result = run_experiment(arguments, do_fit=arguments.foldername is None)
     print("Results: {}".format(str(result)))
 
     if arguments.save_result:

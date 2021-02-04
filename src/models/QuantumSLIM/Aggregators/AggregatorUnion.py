@@ -1,3 +1,5 @@
+from typing import Tuple, List
+
 import numpy as np
 import pandas as pd
 

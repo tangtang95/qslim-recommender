@@ -2,6 +2,7 @@ import argparse
 import os
 
 import pandas as pd
+import numpy as np
 
 from scripts.experiments.run_quantum_slim import DEFAULT_RESPONSES_CSV_FILENAME, DEFAULT_OUTPUT_FOLDER, \
     run_experiment, save_result, parse_results_file
@@ -38,18 +39,16 @@ if __name__ == '__main__':
     resumed_exp_foldername = args.foldername
 
     folderpath = os.path.join(DEFAULT_OUTPUT_FOLDER, args.foldername)
-    preload_df_responses = pd.read_csv(os.path.join(folderpath, DEFAULT_RESPONSES_CSV_FILENAME), sep=",")
 
     exp_args_dict = parse_results_file(os.path.join(folderpath, "results_fail.txt"))
     exp_args_dict = cast_dict_elements(exp_args_dict)
 
     args_dict: dict = vars(args)
-    args_dict["foldername"] = None
 
     final_dict = {**args_dict, **exp_args_dict}
     final_args = argparse.Namespace(**final_dict)
 
-    mdl, result = run_experiment(final_args, preload_df_responses)
+    mdl, result = run_experiment(final_args, do_preload=True, do_fit=True)
     print("Results: {}".format(str(result)))
 
     if args.save_result:
