@@ -198,7 +198,6 @@ def run_experiment(args):
     output_folder_path = os.path.join(args.output_folder, date_string)
 
     item_selection_list = None if args.do_item_selection else ["NONE"]
-    item_selection_list = ["COSINE"]
 
     runParameterSearch_QSLIM(URM_train, solver, n_reads=args.num_reads, filter_items_n=args.filter_items_n,
                              URM_train_last_test=URM_train + URM_val, item_selection_list=item_selection_list,
