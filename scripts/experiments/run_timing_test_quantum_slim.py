@@ -14,7 +14,7 @@ N_EXPERIMENTS = 5
 
 HYPERPARAMETERS = {
     "N_USERS": [1000],
-    "N_ITEMS": [25, 75],
+    "N_ITEMS": [100],
     "DENSITY": [0.05]
 }
 

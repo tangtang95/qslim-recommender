@@ -9,7 +9,7 @@ class ItemSelectorByPopularity(ItemSelectorInterface):
         item_pop = np.array((URM > 0).sum(axis=0)).flatten()
         self.sorted_indices = np.argsort(item_pop)[::-1]
 
-    def get_sorted_best_item_indices(self, URM: sps.csr_matrix, target_column: np.ndarray) -> np.ndarray:
+    def get_sorted_best_item_indices(self, URM: sps.csr_matrix, target_column: np.ndarray, item_idx: int) -> np.ndarray:
         if self.sorted_indices is None:
             item_pop = np.array((URM > 0).sum(axis=0)).flatten()
             sorted_indices = np.argsort(item_pop)[::-1]

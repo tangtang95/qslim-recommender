@@ -76,13 +76,13 @@ def get_arguments():
                         type=str, default=DEFAULT_SOLVER_NAME)
     parser.add_argument("-l", "--loss", help="Loss function to use in Quantum SLIM", choices=LOSS_NAMES,
                         type=str, default=DEFAULT_LOSS)
+
+    # Quantum SLIM Fit setting
     parser.add_argument("-g", "--aggregation", help="Type of aggregation to use on the response of Quantum SLIM solver",
                         choices=AGGREGATION_NAMES, type=str, default=DEFAULT_AGGREGATION)
     parser.add_argument("-fsm", "--filter_sample_method",
                         help="Type of filtering to use on the response of Quantum SLIM solver",
                         choices=FILTER_SAMPLE_METHOD_NAMES, type=str, default=DEFAULT_FILTER_SAMPLE_METHOD)
-
-    # Quantum SLIM Fit setting
     parser.add_argument("-k", "--top_k", help="Number of similar item selected for each item", type=int,
                         default=DEFAULT_TOP_K)
     parser.add_argument("-am", "--alpha_mlt", help="Alpha multiplier of the linear sparsity regulator term", type=float,
@@ -158,8 +158,7 @@ def run_experiment(args, do_preload=False, do_fit=True):
     URM_train, URM_val, URM_test = splitter.get_holdout_split()
 
     solver = get_solver(args.solver_type, args.solver_name, args.token)
-    model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, obj_function=args.loss, agg_strategy=args.aggregation,
-                            filter_sample_method=args.filter_sample_method, verbose=args.verbose)
+    model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, obj_function=args.loss, verbose=args.verbose)
     if do_preload:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
         mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
@@ -167,19 +166,21 @@ def run_experiment(args, do_preload=False, do_fit=True):
 
     if do_fit:
         kwargs = {}
-        if args.num_reads > 0:
-            kwargs["num_reads"] = args.num_reads
         try:
-            model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
+            model.fit(agg_strategy=args.aggregation, filter_sample_method=args.filter_sample_method,
+                      topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
                       chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh,
-                      qubo_round_percentage=args.round_percent, **kwargs)
+                      filter_items_method=args.filter_item_method, filter_items_n=args.filter_item_numbers,
+                      qubo_round_percentage=args.round_percent, num_reads=args.num_reads, **kwargs)
         except OSError:
             print("EXCEPTION: handling exception by saving the model up to now in order to resume it later")
             return model, {}
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
         mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
-        model.W_sparse = model.build_similarity_matrix(df_responses=responses_df, mapping_matrix=mapping_matrix)
+        model.W_sparse = model.build_similarity_matrix(df_responses=responses_df, agg_strategy=args.aggregation,
+                                                       filter_sample_method=args.filter_sample_method,
+                                                       mapping_matrix=mapping_matrix)
 
     evaluator = EvaluatorHoldout(URM_val, cutoff_list=[args.cutoff])
     return model, evaluator.evaluateRecommender(model)[0]

@@ -295,7 +295,7 @@ class SearchAbstractClass(object):
                    "hyperparameters_best"] is not None, "{}: Best hyperparameters not available, the search might have failed.".format(
             self.ALGORITHM_NAME)
         fit_keyword_args = self.metadata_dict["hyperparameters_best"].copy()
-
+        fit_keyword_args = {**fit_keyword_args, **self.recommender_input_args_last_test.FIT_KEYWORD_ARGS}
         recommender_instance.fit(*self.recommender_input_args_last_test.FIT_POSITIONAL_ARGS,
                                  **fit_keyword_args)
 

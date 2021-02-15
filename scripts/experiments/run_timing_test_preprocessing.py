@@ -11,8 +11,7 @@ import scipy.sparse as sps
 from tqdm import tqdm
 
 from course_lib.Base.Recommender_utils import check_matrix
-from scripts.experiments.run_quantum_slim import get_solver, get_loss, get_aggregation_strategy, get_filter_strategy, \
-    get_arguments
+from scripts.experiments.run_quantum_slim import get_solver, get_arguments
 from src.models.QuantumSLIM.QSLIM_Timing import QSLIM_Timing
 from src.utils.utilities import handle_folder_creation, get_project_root_path
 
@@ -27,11 +26,8 @@ HYPERPARAMETERS = {
 
 def run_time_test(URM_train, args):
     solver = get_solver(args.solver_type, args.solver_name, args.token)
-    loss_fn = get_loss(args.loss)
-    agg_strategy = get_aggregation_strategy(args.aggregation)
-    filter_strategy = get_filter_strategy(args.filter, args.top_filter)
-    model = QSLIM_Timing(URM_train=URM_train, solver=solver, transform_fn=loss_fn, agg_strategy=agg_strategy,
-                         filter_strategy=filter_strategy, verbose=args.verbose)
+    model = QSLIM_Timing(URM_train=URM_train, solver=solver, obj_function=args.loss, agg_strategy=args.aggregation,
+                         filter_sample_method=args.filter_sample_method, verbose=args.verbose)
 
     # START FIT TIME
 

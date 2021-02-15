@@ -14,6 +14,7 @@ from src.models.QuantumSLIM.Aggregators.AggregatorUnion import AggregatorUnion
 from src.models.QuantumSLIM.Filters.NoFilter import NoFilter
 from src.models.QuantumSLIM.Filters.TopFilter import TopFilter
 from src.models.QuantumSLIM.ItemSelectors.ItemSelectorAll import ItemSelectorAll
+from src.models.QuantumSLIM.ItemSelectors.ItemSelectorByCosineSimilarity import ItemSelectorByCosineSimilarity
 from src.models.QuantumSLIM.ItemSelectors.ItemSelectorByEntropy import ItemSelectorByEntropy
 from src.models.QuantumSLIM.ItemSelectors.ItemSelectorByPopularity import ItemSelectorByPopularity
 from src.models.QuantumSLIM.ItemSelectors.ItemSelectorByVariance import ItemSelectorByVariance
@@ -66,18 +67,17 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         "NONE": ItemSelectorAll(),
         "POPULARITY": ItemSelectorByPopularity(),
         "ABSOLUTE_ENTROPY": ItemSelectorByEntropy(),
-        "VARIANCE": ItemSelectorByVariance()
+        "VARIANCE": ItemSelectorByVariance(),
+        "COSINE": ItemSelectorByCosineSimilarity(topK=10000, shrink=100, normalize=True)
     }
 
-    def __init__(self, URM_train, solver: dimod.Sampler, agg_strategy: str = "FIRST", obj_function: str = "NORM_MSE",
-                 filter_sample_method: str = "NONE", do_save_responses=False, verbose=True):
+    def __init__(self, URM_train, solver: dimod.Sampler, obj_function: str = "NORM_MSE",
+                 do_save_responses=False, verbose=True):
         super(QuantumSLIM_MSE, self).__init__(URM_train, verbose=verbose)
-        self._check_init_parameters(agg_strategy, obj_function, filter_sample_method)
+        self._check_init_parameters(obj_function)
 
-        self.solver = solver
-        self.agg_strategy = agg_strategy
         self.obj_function = obj_function
-        self.filter_sample_method = filter_sample_method
+        self.solver = solver
         self.df_responses = None
         self.mapping_matrix = []
         self.do_save_responses = do_save_responses
@@ -99,17 +99,17 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
     def get_implemented_filter_item_methods(cls):
         return list(cls.FILTER_ITEMS_METHODS.keys())
 
-    def _check_init_parameters(self, aggregation_strategy, obj_function, filter_sample_method):
-        if aggregation_strategy not in self.get_implemented_aggregators():
-            raise NotImplementedError("Filter strategy {} is not implemented".format(aggregation_strategy))
+    def _check_init_parameters(self, obj_function):
         if obj_function not in self.get_implemented_losses():
             raise NotImplementedError("Objective function {} is not implemented".format(obj_function))
+
+    def _check_fit_parameters(self, aggregation_strategy, filter_item_method, filter_sample_method):
+        if aggregation_strategy not in self.get_implemented_aggregators():
+            raise NotImplementedError("Filter strategy {} is not implemented".format(aggregation_strategy))
+        if filter_item_method not in self.get_implemented_filter_item_methods():
+            raise NotImplementedError("Filter item method {} is not implemented".format(filter_item_method))
         if filter_sample_method not in self.get_implemented_filter_samples_methods():
             raise NotImplementedError("Filter sample method {} is not implemented".format(filter_sample_method))
-
-    def _check_fit_parameters(self, filter_item_method):
-        if filter_item_method not in self.get_implemented_filter_samples_methods():
-            raise NotImplementedError("Filter item method {} is not implemented".format(filter_item_method))
 
     def preload_fit(self, df_responses, mapping_matrix):
         """
@@ -123,19 +123,22 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         self.mapping_matrix = mapping_matrix
         self.to_resume = True
 
-    def add_sample_responses_to_matrix_builder(self, matrix_builder, response_df, curr_item, mapping):
+    def add_sample_responses_to_matrix_builder(self, matrix_builder, agg_strategy, filter_sample_method,
+                                               response_df, curr_item, mapping):
         """
         Add a column on "curr_item" index to the IncrementalSparseMatrix matrix_builder with the samples inside
         response_df.
 
         :param matrix_builder: The IncrementalSparseMatrix builder required to build the sparse matrix
+        :param agg_strategy: the post-processing aggregation to be used on the samples
+        :param filter_sample_method: the filter technique used before the post-processing aggregation
         :param response_df: the samples related to the item of index "curr_item"
         :param curr_item: the index of the item column to be added on the builder
         :type mapping: np.ndarray containing the mapping of the samples variables into the original variables
         :return: None
         """
-        filtered_response_df = self.FILTER_SAMPLES_METHODS[self.filter_sample_method].filter_samples(response_df)
-        solution_list = self.AGGREGATORS[self.agg_strategy].get_aggregated_response(filtered_response_df)
+        filtered_response_df = self.FILTER_SAMPLES_METHODS[filter_sample_method].filter_samples(response_df)
+        solution_list = self.AGGREGATORS[agg_strategy].get_aggregated_response(filtered_response_df)
 
         self._print("The aggregated response for item {} is {}".format(curr_item,
                                                                        solution_list))
@@ -143,7 +146,7 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         row_indices = np.where(solution_list > 0)[0]
         matrix_builder.add_data_lists(mapping[row_indices], [curr_item] * len(row_indices), solution_list[row_indices])
 
-    def build_similarity_matrix(self, df_responses, mapping_matrix):
+    def build_similarity_matrix(self, df_responses, agg_strategy, filter_sample_method, mapping_matrix):
         """
         It builds the similarity matrix by using a dataframe with all the samples collected from the solver in the
         fit function.
@@ -153,6 +156,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         a column of the similarity matrix.
 
         :param df_responses: a dataframe containing the samples collected from the solver
+        :param agg_strategy: the post-processing aggregation to be used on the samples
+        :param filter_sample_method: the filter technique used before the post-processing aggregation
         :param mapping_matrix: list of np.ndarray containing the mapping of the samples variables into the original
                                variables for each item problem
         :return: the similarity matrix built from the dataframe given
@@ -162,13 +167,14 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
 
         for currentItem in range(n_items):
             response_df = df_responses[df_responses.item_id == currentItem].copy()
-            self.add_sample_responses_to_matrix_builder(matrix_builder, response_df,
+            self.add_sample_responses_to_matrix_builder(matrix_builder, agg_strategy, filter_sample_method, response_df,
                                                         currentItem, mapping_matrix[currentItem])
 
         return sps.csr_matrix(matrix_builder.get_SparseMatrix())
 
-    def fit(self, topK=5, alpha_multiplier=0, constraint_multiplier=1, chain_multiplier=1,
-            filter_items_method="NONE", filter_items_n=100, **solver_parameters):
+    def fit(self, agg_strategy="FIRST", filter_sample_method="NONE", topK=5, alpha_multiplier=0,
+            constraint_multiplier=1, chain_multiplier=1, filter_items_method="NONE", filter_items_n=100,
+            num_reads=100, **filter_items_parameters):
         """
         It fits the data (i.e. URM_train) by solving an optimization problem for each item. Each optimization problem
         is generated from the URM_train without the target column and the target column by means of transformation to
@@ -177,6 +183,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
 
         Then by using the samples collected from the solver, it builds the item-similarity matrix.
 
+        :param agg_strategy: the post-processing aggregation to be used on the samples
+        :param filter_sample_method: the filter technique used before the post-processing aggregation
         :param topK: a regulator number that indicates the number of selected variables forced during the optimization
         :param alpha_multiplier: a multiplier number applied on the constraint of the sparsity regulator term
         :param constraint_multiplier: a multiplier number applied on the constraint strength of the variable
@@ -185,9 +193,12 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         :param filter_items_method: name of the filtering method to select a set of items for the resolution of the
                                     optimization problem
         :param filter_items_n: number of items to be selected by the filtering method
-        :param solver_parameters: other parameters of the sample function of the solver
+        :param num_reads: number of samples to compute from the solver
+        :param filter_items_parameters: other parameters regarding the filter items method
         """
-        self._check_fit_parameters(filter_items_method)
+        self._check_fit_parameters(agg_strategy, filter_items_method, filter_sample_method)
+        if filter_items_method == "COSINE":
+            self.FILTER_ITEMS_METHODS["COSINE"] = ItemSelectorByCosineSimilarity(**filter_items_parameters)
         URM_train = check_matrix(self.URM_train, 'csc', dtype=np.float32)
 
         n_items = URM_train.shape[1]
@@ -220,6 +231,7 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
             # select items to be used in the QUBO optimization problem
             URM = URM_train.copy()
             URM, mapping_array = self.FILTER_ITEMS_METHODS[filter_items_method].filter_items(URM, target_column,
+                                                                                             curr_item,
                                                                                              filter_items_n)
             n_variables = len(mapping_array)
 
@@ -253,12 +265,12 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                         or "qpu_properties" in self.solver.properties:
                     chain_strength = max(self.MIN_CONSTRAINT_STRENGTH,
                                          chain_multiplier * (np.max(qubo) - np.min(qubo)))
-                    response = self.solver.sample(bqm, chain_strength=chain_strength, **solver_parameters)
+                    response = self.solver.sample(bqm, chain_strength=chain_strength, num_reads=num_reads)
                     self._print("Break chain percentage of item {} is {}"
                                 .format(curr_item, list(response.data(fields=["chain_break_fraction"]))))
                     self._print("Timing of QPU is %s" % response.info["timing"])
                 else:
-                    response = self.solver.sample(bqm, **solver_parameters)
+                    response = self.solver.sample(bqm, num_reads=num_reads)
 
                 self._print("The response for item {} is {}".format(curr_item, response.aggregate()))
             except OSError as err:
@@ -273,13 +285,15 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                 self.mapping_matrix.append(mapping_array)
             else:
                 self.df_responses = self.df_responses.reindex(sorted(self.df_responses.columns), axis=1)
-                self.add_sample_responses_to_matrix_builder(matrix_builder, response_df, curr_item, mapping_array)
+                self.add_sample_responses_to_matrix_builder(matrix_builder, agg_strategy, filter_sample_method,
+                                                            response_df, curr_item, mapping_array)
 
             # restore URM_train
             URM_train.data[start_pos:end_pos] = current_item_data_backup
 
         if self.do_save_responses:
             self.df_responses = self.df_responses.reindex(sorted(self.df_responses.columns), axis=1)
-            self.W_sparse = self.build_similarity_matrix(self.df_responses, self.mapping_matrix)
+            self.W_sparse = self.build_similarity_matrix(self.df_responses, agg_strategy, filter_sample_method,
+                                                         self.mapping_matrix)
         else:
             self.W_sparse = matrix_builder.get_SparseMatrix()

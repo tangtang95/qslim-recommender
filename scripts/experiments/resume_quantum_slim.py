@@ -1,10 +1,7 @@
 import argparse
 import os
 
-import pandas as pd
-import numpy as np
-
-from scripts.experiments.run_quantum_slim import DEFAULT_RESPONSES_CSV_FILENAME, DEFAULT_OUTPUT_FOLDER, \
+from scripts.experiments.run_quantum_slim import DEFAULT_OUTPUT_FOLDER, \
     run_experiment, save_result, parse_results_file
 from src.utils.utilities import str2bool, cast_dict_elements
 

@@ -1,6 +1,7 @@
 import argparse
 import os
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 
 def cast_dict_elements(temp_dict):
@@ -104,9 +105,8 @@ def set_size(width, fraction=1, subplots=(1, 1)):
 
 
 def save_low_and_high_resolution_images(filename):
-    import matplotlib.pyplot as plt
-    plt.savefig(filename + ".pdf", format="pdf", bbox_inches="tight", dpi=300)
-    plt.savefig(filename + ".png", format="png", bbox_inches="tight", dpi=75)
+    plt.savefig(filename + ".pgf", format="pgf", bbox_inches="tight")
+    #plt.savefig(filename + ".png", format="png", bbox_inches="tight", dpi=75)
 
 
 def get_project_root_path():
