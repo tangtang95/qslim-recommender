@@ -80,10 +80,13 @@ if __name__ == '__main__':
 
         if parameter_values["SolverType"].endswith("QPU") and parameter_values["Cached"] == "No":
             samples_filepath = os.path.join("/".join(filepath.split("/")[:-1]), "solver_responses.csv")
-            samples_df = pd.read_csv(samples_filepath)
-            parameter_values["CHAIN_BREAK_FRACTION_MAX"] = samples_df["chain_break_fraction"].max()
-            parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = np.mean(samples_df["chain_break_fraction"])
-            parameter_values["CHAIN_BREAK_FRACTION_STD"] = np.std(samples_df["chain_break_fraction"])
+            try:
+                samples_df = pd.read_csv(samples_filepath)
+                parameter_values["CHAIN_BREAK_FRACTION_MAX"] = samples_df["chain_break_fraction"].max()
+                parameter_values["CHAIN_BREAK_FRACTION_MEAN"] = np.mean(samples_df["chain_break_fraction"])
+                parameter_values["CHAIN_BREAK_FRACTION_STD"] = np.std(samples_df["chain_break_fraction"])
+            except Exception as e:
+                print("No solver responses file")
 
         if parameter_values["SolverType"] == "LAZY_QPU":
             parameter_values["SolverType"] = "FIXED_QPU"
@@ -91,7 +94,10 @@ if __name__ == '__main__':
         if parameter_values["SolverType"].endswith("QPU") and parameter_values["SolverName"] == "":
             parameter_values["SolverName"] = "DW_2000Q"
 
-        if parameter_values["FilterStrategy"] == "NONE":
+        if parameter_values.get("FilterStrategy") is not None and parameter_values["FilterStrategy"] == "NONE":
+            parameter_values["TopFilterValue"] = ""
+        if parameter_values.get("FilterStrategy") is None:
+            parameter_values["FilterStrategy"] = ""
             parameter_values["TopFilterValue"] = ""
 
         if parameter_values["SolverType"] == "SA":

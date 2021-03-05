@@ -114,6 +114,8 @@ def get_arguments():
     parser.add_argument("-v", "--verbose", help="Whether to output on command line much as possible",
                         type=str2bool, default=True)
     parser.add_argument("-sr", "--save_result", help="Whether to store results or not", type=str2bool, default=True)
+    parser.add_argument("-ss", "--save_samples", help="Whether to store samples from solvers or not", type=str2bool,
+                        default=False)
     parser.add_argument("-o", "--output_folder", default=DEFAULT_OUTPUT_FOLDER,
                         help="Basic folder where to store the output", type=str)
 
@@ -156,9 +158,11 @@ def run_experiment(args, do_preload=False, do_fit=True):
     splitter.load_data()
 
     URM_train, URM_val, URM_test = splitter.get_holdout_split()
+    URM_train = URM_train + URM_val
 
     solver = get_solver(args.solver_type, args.solver_name, args.token)
-    model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, obj_function=args.loss, verbose=args.verbose)
+    model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, obj_function=args.loss, verbose=args.verbose,
+                            do_save_responses=args.save_samples)
     if do_preload:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
         mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
@@ -169,20 +173,22 @@ def run_experiment(args, do_preload=False, do_fit=True):
         try:
             model.fit(agg_strategy=args.aggregation, filter_sample_method=args.filter_sample_method,
                       topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
-                      chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh,
-                      filter_items_method=args.filter_item_method, filter_items_n=args.filter_item_numbers,
-                      qubo_round_percentage=args.round_percent, num_reads=args.num_reads, **kwargs)
+                      chain_multiplier=args.chain_mlt,  filter_items_method=args.filter_item_method,
+                      filter_items_n=args.filter_item_numbers, num_reads=args.num_reads, **kwargs)
         except OSError:
             print("EXCEPTION: handling exception by saving the model up to now in order to resume it later")
             return model, {}
     else:
         responses_df = pd.read_csv(os.path.join(args.output_folder, args.foldername, DEFAULT_RESPONSES_CSV_FILENAME))
-        mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
+        try:
+            mapping_matrix = np.load(os.path.join(args.output_folder, args.foldername, DEFAULT_MAPPING_MATRIX_FILENAME))
+        except FileNotFoundError:
+            mapping_matrix = None
         model.W_sparse = model.build_similarity_matrix(df_responses=responses_df, agg_strategy=args.aggregation,
                                                        filter_sample_method=args.filter_sample_method,
                                                        mapping_matrix=mapping_matrix)
 
-    evaluator = EvaluatorHoldout(URM_val, cutoff_list=[args.cutoff])
+    evaluator = EvaluatorHoldout(URM_test, cutoff_list=[args.cutoff])
     return model, evaluator.evaluateRecommender(model)[0]
 
 

@@ -163,6 +163,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
         :return: the similarity matrix built from the dataframe given
         """
         n_items = self.URM_train.shape[1]
+        if mapping_matrix is None:
+            mapping_matrix = np.repeat(np.reshape(np.arange(0, n_items), newshape=(1, n_items)), repeats=n_items, axis=0)
         matrix_builder = IncrementalSparseMatrix(n_rows=n_items, n_cols=n_items)
 
         for currentItem in range(n_items):

@@ -11,7 +11,7 @@ if __name__ == '__main__':
     input_filepath = os.path.join(data_path, "ml100k.tsv")
     df = pd.read_csv(filepath_or_buffer=input_filepath, sep="\t", header=None)
 
-    df[2] = 1
+    #df[2] = 1
     df = df.drop(columns=[3])
 
     output_filepath = os.path.join(data_path, "ml100k.csv")

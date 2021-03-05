@@ -39,7 +39,7 @@ def runParameterSearch_SLIM(URM_train, URM_train_last_test=None,
                                               evaluator_test=evaluator_test)
 
         hyperparameters_range_dictionary = {}
-        hyperparameters_range_dictionary["topK"] = Integer(3, 50)
+        hyperparameters_range_dictionary["topK"] = Integer(3, 1000)
         hyperparameters_range_dictionary["l1_ratio"] = Real(low=1e-5, high=1.0, prior='log-uniform')
         hyperparameters_range_dictionary["alpha"] = Real(low=1e-3, high=1.0, prior='uniform')
 
