@@ -7,14 +7,8 @@ import argparse
 USE_LIST = False
 
 HYPERPARAMETERS = {
-    "loss": ["NORM_MSE"],
-    "filter": ["TOP"],
-    "top_filter": [0.4],
-    "aggregation": ["LOG", "LOG_FIRST", "AVG", "AVG_FIRST"],
-    "top_k": [5],
-    "alpha_mlt": [0],
-    "constr_mlt": [1.0],
-    "chain_mlt": [1.0]
+    "top_k": [5, 10, 20],
+    "aggregation": ["LOG", "LOG_FIRST", "AVG", "AVG_FIRST"]
 }
 
 # use in case of failed experiments

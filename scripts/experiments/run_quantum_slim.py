@@ -100,11 +100,6 @@ def get_arguments():
     parser.add_argument("-fin", "--filter_item_numbers",
                         help="Number of items to be filtered by the Filter Item Method",
                         type=int, default=DEFAULT_FILTER_ITEM_NUMBERS)
-    parser.add_argument("-ut", "--unpop_thresh", help="The threshold of unpopularity for the removal of unpopular "
-                                                      "items",
-                        type=int, default=DEFAULT_UNPOPULAR_THRESHOLD)
-    parser.add_argument("-qrp", "--round_percent", help="The percentage of rounding to apply on QUBO matrix",
-                        type=float, default=DEFAULT_QUBO_ROUND_PERCENTAGE)
 
     # Evaluation setting
     parser.add_argument("-c", "--cutoff", help="Cutoff value for evaluation", type=int,
@@ -158,7 +153,6 @@ def run_experiment(args, do_preload=False, do_fit=True):
     splitter.load_data()
 
     URM_train, URM_val, URM_test = splitter.get_holdout_split()
-    URM_train = URM_train + URM_val
 
     solver = get_solver(args.solver_type, args.solver_name, args.token)
     model = QuantumSLIM_MSE(URM_train=URM_train, solver=solver, obj_function=args.loss, verbose=args.verbose,
@@ -169,12 +163,11 @@ def run_experiment(args, do_preload=False, do_fit=True):
         model.preload_fit(responses_df, mapping_matrix)
 
     if do_fit:
-        kwargs = {}
         try:
             model.fit(agg_strategy=args.aggregation, filter_sample_method=args.filter_sample_method,
                       topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
                       chain_multiplier=args.chain_mlt,  filter_items_method=args.filter_item_method,
-                      filter_items_n=args.filter_item_numbers, num_reads=args.num_reads, **kwargs)
+                      filter_items_n=args.filter_item_numbers, num_reads=args.num_reads)
         except OSError:
             print("EXCEPTION: handling exception by saving the model up to now in order to resume it later")
             return model, {}
@@ -188,7 +181,7 @@ def run_experiment(args, do_preload=False, do_fit=True):
                                                        filter_sample_method=args.filter_sample_method,
                                                        mapping_matrix=mapping_matrix)
 
-    evaluator = EvaluatorHoldout(URM_test, cutoff_list=[args.cutoff])
+    evaluator = EvaluatorHoldout(URM_val, cutoff_list=[args.cutoff])
     return model, evaluator.evaluateRecommender(model)[0]
 
 

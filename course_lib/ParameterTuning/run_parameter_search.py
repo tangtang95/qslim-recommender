@@ -64,22 +64,22 @@ def run_KNNRecommender_on_similarity_type(similarity_type, parameterSearch,
     hyperparameters_range_dictionary["topK"] = Integer(5, 1000)
     hyperparameters_range_dictionary["shrink"] = Integer(0, 1000)
     hyperparameters_range_dictionary["similarity"] = Categorical([similarity_type])
-    hyperparameters_range_dictionary["normalize"] = Categorical([True, False])
+    hyperparameters_range_dictionary["normalize"] = Categorical([1, 0])
 
     is_set_similarity = similarity_type in ["tversky", "dice", "jaccard", "tanimoto"]
 
     if similarity_type == "asymmetric":
         hyperparameters_range_dictionary["asymmetric_alpha"] = Real(low=0, high=2, prior='uniform')
-        hyperparameters_range_dictionary["normalize"] = Categorical([True])
+        hyperparameters_range_dictionary["normalize"] = Categorical([1])
 
     elif similarity_type == "tversky":
         hyperparameters_range_dictionary["tversky_alpha"] = Real(low=0, high=2, prior='uniform')
         hyperparameters_range_dictionary["tversky_beta"] = Real(low=0, high=2, prior='uniform')
-        hyperparameters_range_dictionary["normalize"] = Categorical([True])
+        hyperparameters_range_dictionary["normalize"] = Categorical([1])
 
     elif similarity_type == "euclidean":
-        hyperparameters_range_dictionary["normalize"] = Categorical([True, False])
-        hyperparameters_range_dictionary["normalize_avg_row"] = Categorical([True, False])
+        hyperparameters_range_dictionary["normalize"] = Categorical([1, 0])
+        hyperparameters_range_dictionary["normalize_avg_row"] = Categorical([1, 0])
         hyperparameters_range_dictionary["similarity_from_distance_mode"] = Categorical(["lin", "log", "exp"])
 
     if not is_set_similarity:
@@ -296,10 +296,10 @@ def runParameterSearch_Collaborative(recommender_class, URM_train, URM_train_las
 
         if recommender_class is RP3betaRecommender:
             hyperparameters_range_dictionary = {}
-            hyperparameters_range_dictionary["topK"] = Integer(5, 1000)
+            hyperparameters_range_dictionary["topK"] = Integer(3, 50)
             hyperparameters_range_dictionary["alpha"] = Real(low=0, high=2, prior='uniform')
             hyperparameters_range_dictionary["beta"] = Real(low=0, high=2, prior='uniform')
-            hyperparameters_range_dictionary["normalize_similarity"] = Categorical([True, False])
+            hyperparameters_range_dictionary["normalize_similarity"] = Categorical([1, 0])
 
             recommender_input_args = SearchInputRecommenderArgs(
                 CONSTRUCTOR_POSITIONAL_ARGS=[URM_train],
@@ -355,8 +355,8 @@ def runParameterSearch_Collaborative(recommender_class, URM_train, URM_train_las
         if recommender_class is MatrixFactorization_BPR_Cython:
             hyperparameters_range_dictionary = {}
             hyperparameters_range_dictionary["sgd_mode"] = Categorical(["sgd", "adagrad", "adam"])
-            hyperparameters_range_dictionary["epochs"] = Categorical([1500])
-            hyperparameters_range_dictionary["num_factors"] = Integer(1, 200)
+            hyperparameters_range_dictionary["epochs"] = Integer(20, 500)
+            hyperparameters_range_dictionary["num_factors"] = Integer(1, 50)
             hyperparameters_range_dictionary["batch_size"] = Categorical([1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024])
             hyperparameters_range_dictionary["positive_reg"] = Real(low=1e-5, high=1e-2, prior='log-uniform')
             hyperparameters_range_dictionary["negative_reg"] = Real(low=1e-5, high=1e-2, prior='log-uniform')
@@ -404,7 +404,7 @@ def runParameterSearch_Collaborative(recommender_class, URM_train, URM_train_las
 
         if recommender_class is NMFRecommender:
             hyperparameters_range_dictionary = {}
-            hyperparameters_range_dictionary["num_factors"] = Integer(1, 350)
+            hyperparameters_range_dictionary["num_factors"] = Integer(1, 100)
             hyperparameters_range_dictionary["solver"] = Categorical(["coordinate_descent", "multiplicative_update"])
             hyperparameters_range_dictionary["init_type"] = Categorical(["random", "nndsvda"])
             hyperparameters_range_dictionary["beta_loss"] = Categorical(["frobenius", "kullback-leibler"])

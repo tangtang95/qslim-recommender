@@ -249,7 +249,7 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                     (n_variables, n_variables))
 
             # Generation of the BQM with qubo in a quicker way checked with some performance measuring. On a test of
-            # 2000 n_items, this method is quicker w.r.t. from_numpy_matrix function
+            # 2000 n_items, this method is quicker w.r.t. from_numpy_matrix function of dimod
             bqm = dimod.BinaryQuadraticModel.empty(dimod.BINARY)
             bqm.add_variables_from(dict(zip(variables, np.diag(qubo))))
 
@@ -279,7 +279,8 @@ class QuantumSLIM_MSE(BaseItemSimilarityMatrixRecommender):
                 traceback.print_exc()
                 raise err
 
-            # save response in self.responses
+            # save response in self.responses if self.do_save_responses is True; otherwise apply post-processing
+            # and put the results in the matrix builder
             response_df = response.to_pandas_dataframe()
             response_df[self.ITEM_ID_COLUMN_NAME] = curr_item
             if self.do_save_responses:

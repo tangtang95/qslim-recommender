@@ -6,6 +6,9 @@ from src.models.QuantumSLIM.ItemSelectors.ItemSelectorInterface import ItemSelec
 
 
 class ItemSelectorByEntropy(ItemSelectorInterface):
+    """
+    Item selector that selects the items to be kept by absolute entropy. The higher entropy items are kept.
+    """
 
     def precompute_best_item_indices(self, URM: sps.csr_matrix):
         entropies = entropy(URM.toarray(), axis=0)

@@ -5,6 +5,9 @@ from src.models.QuantumSLIM.ItemSelectors.ItemSelectorInterface import ItemSelec
 
 
 class ItemSelectorByPopularity(ItemSelectorInterface):
+    """
+    Item selector that selects the items to be kept by item popularity. The higher popular items are kept.
+    """
     def precompute_best_item_indices(self, URM):
         item_pop = np.array((URM > 0).sum(axis=0)).flatten()
         self.sorted_indices = np.argsort(item_pop)[::-1]

@@ -14,25 +14,23 @@ N_EXPERIMENTS = 5
 
 HYPERPARAMETERS = {
     "N_USERS": [1000],
-    "N_ITEMS": [100],
+    "N_ITEMS": [100, 200, 300, 400, 500],
     "DENSITY": [0.05]
 }
 
 
 def run_time_test(URM_train, args):
     solver = get_solver(args.solver_type, args.solver_name, args.token)
-    model = QSLIM_Timing(URM_train=URM_train, solver=solver, obj_function=args.loss, agg_strategy=args.aggregation,
-                         filter_sample_method=args.filter_sample_method, verbose=args.verbose)
+    model = QSLIM_Timing(URM_train=URM_train, solver=solver, obj_function=args.loss, verbose=args.verbose,
+                         do_save_responses=args.save_samples)
 
     # START FIT TIME
     _fit_time_start = time.time()
-    kwargs = {}
-    if args.num_reads > 0:
-        kwargs["num_reads"] = args.num_reads
     try:
-        model.fit(topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
-                  chain_multiplier=args.chain_mlt, unpopular_threshold=args.unpop_thresh,
-                  qubo_round_percentage=args.round_percent, **kwargs)
+        model.fit(agg_strategy=args.aggregation, filter_sample_method=args.filter_sample_method,
+                  topK=args.top_k, alpha_multiplier=args.alpha_mlt, constraint_multiplier=args.constr_mlt,
+                  chain_multiplier=args.chain_mlt, filter_items_method=args.filter_item_method,
+                  filter_items_n=args.filter_item_numbers, num_reads=args.num_reads)
     except OSError:
         print("EXCEPTION: handling exception by saving the model up to now in order to resume it later")
         return model, {}

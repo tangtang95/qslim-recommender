@@ -5,7 +5,9 @@ from src.models.QuantumSLIM.ItemSelectors.ItemSelectorInterface import ItemSelec
 
 
 class ItemSelectorByVariance(ItemSelectorInterface):
-
+    """
+    Item selector that selects the items to be kept by variance. The higher variance items are kept.
+    """
     def precompute_best_item_indices(self, URM: sps.csr_matrix):
         c_URM = URM.copy()
         c_URM.data **= 2

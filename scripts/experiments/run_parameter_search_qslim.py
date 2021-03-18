@@ -13,6 +13,7 @@ from course_lib.ParameterTuning.SearchAbstractClass import SearchInputRecommende
 from course_lib.ParameterTuning.SearchBayesianSkopt import SearchBayesianSkopt
 from scripts.experiments.run_quantum_slim import get_solver
 from src.data.NoHeaderCSVReader import NoHeaderCSVReader
+from src.models.QuantumSLIM.ItemSelectors.ItemSelectorByCosineSimilarity import ItemSelectorByCosineSimilarity
 from src.models.QuantumSLIM.QuantumSLIM_MSE import QuantumSLIM_MSE
 from src.utils.utilities import get_project_root_path, str2bool
 
@@ -96,15 +97,17 @@ def run_QSLIM_on_item_selection(item_selection_type, parameterSearch, parameter_
     original_parameter_search_space = parameter_search_space
 
     hyperparameters_range_dictionary = {}
-    hyperparameters_range_dictionary["topK"] = Integer(3, 50)
+    hyperparameters_range_dictionary["topK"] = Integer(0, 10)
     hyperparameters_range_dictionary["filter_items_method"] = Categorical([item_selection_type])
     hyperparameters_range_dictionary["agg_strategy"] = Categorical(QuantumSLIM_MSE.get_implemented_aggregators())
     #hyperparameters_range_dictionary["filter_sample_method"] = Categorical(QuantumSLIM_MSE.get_implemented_filter_samples_methods())
-    hyperparameters_range_dictionary["constraint_multiplier"] = Real(low=0, high=5, prior='uniform')
+    hyperparameters_range_dictionary["constraint_multiplier"] = Real(low=0.1, high=1, prior='uniform')
+    hyperparameters_range_dictionary["chain_multiplier"] = Real(low=0.5, high=2, prior='uniform')
 
     if item_selection_type == "COSINE":
-        hyperparameters_range_dictionary["shrink"] = Integer(0, 100)
+        hyperparameters_range_dictionary["shrink"] = Integer(0, 1000)
         hyperparameters_range_dictionary["normalize"] = Categorical([1, 0])
+        hyperparameters_range_dictionary["feature_weighting"] = Categorical(ItemSelectorByCosineSimilarity.FEATURE_WEIGHTING_VALUES)
 
     local_parameter_search_space = {**hyperparameters_range_dictionary, **original_parameter_search_space}
 
@@ -199,6 +202,7 @@ def run_experiment(args):
 
     item_selection_list = None if args.do_item_selection else ["NONE"]
 
+    np.random.seed(None)
     runParameterSearch_QSLIM(URM_train, solver, n_reads=args.num_reads, filter_items_n=args.filter_items_n,
                              URM_train_last_test=URM_train + URM_val, item_selection_list=item_selection_list,
                              metric_to_optimize="MAP", evaluator_validation=evaluator_val,

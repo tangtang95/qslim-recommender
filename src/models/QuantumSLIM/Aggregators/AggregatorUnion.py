@@ -7,6 +7,14 @@ from src.models.QuantumSLIM.Aggregators.AggregatorInterface import AggregatorInt
 
 
 class AggregatorUnion(AggregatorInterface):
+    """
+    Aggregate the samples by summing the value of the variables over the samples. Then apply a vector operation
+    (i.e. operator_fn parameter) over the result of the previous sum. In the end, divide by the number of samples.
+     - If the parameter 'is_filter_first' is True, then the final aggregation non-zero values corresponds to the
+       non-zero values of the minimum energy sample.
+     - If the parameter 'is_weighted' is True, the sum is a weighted sum based on the min-max normalized energy of
+       the samples
+    """
     def __init__(self, operator_fn: callable, is_filter_first: bool, is_weighted: bool):
         self.operator_fn = operator_fn
         self.is_filter_first = is_filter_first
